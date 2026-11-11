@@ -157,7 +157,7 @@ function mockImage(w, h, seed, label) {
 function indexPage() {
   const items = listFixtures().concat(['cycle']).map((n) =>
     '<li><a href="/?fixture=' + n + '">' + n + '</a> · <a href="/?fixture=' + n + '&kiosk=1">kiosk</a> · ' +
-    '<a href="/_mock/set?fixture=' + n + '">set global</a></li>').join('');
+    '<a href="/?c4mock=1&fixture=' + n + '">C4 transport</a> · <a href="/_mock/set?fixture=' + n + '">set global</a></li>').join('');
   return '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">' +
     '<title>Now Playing mock</title><body style="font:16px/1.6 sans-serif;background:#111;color:#ddd;padding:24px">' +
     '<h1>Now Playing Info – mock server</h1><p>Global fixture: <b>' + current + '</b> · fail mode: <b>' + failMode +

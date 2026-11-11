@@ -163,7 +163,8 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
 .album em{font-style:italic;font-family:var(--serif);color:var(--fg)}
 
 /* separators sit before each item; the container is shifted left and clipped so a wrapped line never starts with a dot */
-.meta{display:flex;flex-wrap:wrap;align-items:center;font-size:.98rem;color:var(--fg2);margin-top:1.15rem;margin-left:-1.4rem;overflow:hidden}
+.meta{display:flex;flex-wrap:wrap;align-items:center;font-size:.98rem;color:var(--fg2);margin-left:-1.4rem}
+.meta-wrap{overflow:hidden;margin-top:1.15rem}
 .meta>span{position:relative;display:inline-flex;align-items:center;padding-left:1.4rem;margin-bottom:.3rem;white-space:nowrap;max-width:100%}
 .meta>span:before{content:"";position:absolute;left:.58rem;top:50%;margin-top:-.12rem;width:.24rem;height:.24rem;border-radius:50%;background:var(--fg4)}
 .badge{border:1px solid rgba(243,239,230,.5);border-radius:.22rem;padding:.04rem .38rem;font-size:.76rem;font-weight:700;letter-spacing:.06em;color:var(--fg)}
@@ -189,7 +190,7 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
 .clamp.is-clamped,.clamp.is-open{cursor:pointer}
 .overview{font-size:1.03rem;line-height:1.58;color:var(--fg2);margin-top:.75rem;max-width:44rem}
 .tagline+.overview{margin-top:.45rem}
-.meta+.overview,.ratings+.overview{margin-top:1rem}
+.meta-wrap+.overview,.ratings+.overview{margin-top:1rem}
 
 /* progress */
 .progress{margin-top:1.7rem;max-width:44rem}
@@ -240,7 +241,7 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
 .epcard-body{flex:1 1 auto;min-width:0;max-width:44rem}
 .epcard-code{color:var(--accent);font-weight:700;letter-spacing:.16em;font-size:.78rem;text-transform:uppercase}
 .epcard-title{font-family:var(--serif);font-size:1.75rem;font-weight:700;line-height:1.15;margin:.4rem 0 0}
-.epcard .meta{margin-top:.7rem;font-size:.9rem}
+.epcard .meta-wrap{margin-top:.7rem}.epcard .meta{font-size:.9rem}
 .epcard .overview{margin-top:.8rem}
 .star{color:#f5c518;margin-right:.3rem;font-size:.95rem}
 .strip{display:flex;flex-wrap:wrap;margin-top:1.6rem}
@@ -284,6 +285,7 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
 .fact-v{font-size:1rem;color:var(--fg);line-height:1.42;word-wrap:break-word;overflow-wrap:break-word}
 
 /* footer */
+.sections:empty{background:none;padding:0}
 .sections:empty+.foot{background:none}
 .foot{padding:2.75rem var(--pad) 2rem;font-size:.72rem;line-height:1.6;color:var(--fg4);background:rgba(11,11,13,.97);display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap}
 .foot-attr{margin-right:2rem;min-width:0}
@@ -600,7 +602,7 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
   // ------------------------------------------------------------------ model
   var KINDS = { movie: 1, episode: 1, music: 1, live_tv: 1, video: 1, unknown: 1 };
   var STATE_LABEL = { playing: 'Now playing', paused: 'Paused', buffering: 'Loading', stopped: 'Stopped', idle: 'Idle', off: 'Off' };
-  var KIND_LABEL = { movie: 'Film', episode: 'Series', music: 'Music', live_tv: 'Live TV', video: 'Video', unknown: 'Now playing' };
+  var KIND_LABEL = { movie: 'Film', episode: 'Series', music: 'Music', live_tv: 'Live TV', video: 'Video', unknown: 'Media' };
 
   function buildModel(st) {
     var pb = obj(st.playback), m = obj(st.media), src = obj(st.source), room = obj(st.room);
@@ -624,7 +626,7 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
       raw: st, state: state, kind: kind, idle: idle, key: key,
       sig: key + '\u0001' + JSON.stringify(st.media || null) + JSON.stringify(st.details || null),
       pb: pb, m: m, d: d, dd: dd, src: src, room: str(room.name),
-      title: title || str(src.app_name) || 'Now playing',
+      title: title || str(src.app_name) || str(src.device_name) || 'Untitled',
       device: str(src.device_name), app: str(src.app_name), appIcon: url(src.app_icon_url)
     };
   }
@@ -779,7 +781,7 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
       if (typeof it === 'string') { row.appendChild(el('span', '', it)); n++; }
       else { var s = el('span'); s.appendChild(it); row.appendChild(s); n++; }
     });
-    return n ? row : null;
+    return n ? add(el('div', 'meta-wrap'), row) : null;
   }
   function badge(t) { return t ? el('span', 'badge', t) : null; }
   function epCode(s, e) {
