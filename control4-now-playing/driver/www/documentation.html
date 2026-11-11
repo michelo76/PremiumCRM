@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Now Playing Info - Driver Documentation</title>
+<style>
+  body { font-family: "Segoe UI", Arial, sans-serif; font-size: 13px; line-height: 1.5; color: #222; margin: 16px 24px; max-width: 980px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 26px 0 8px; padding-bottom: 3px; border-bottom: 1px solid #ccc; }
+  h3 { font-size: 14px; margin: 18px 0 6px; }
+  code, .mono { font-family: Consolas, "Courier New", monospace; font-size: 12px; background: #f3f3f3; padding: 0 3px; }
+  pre { font-family: Consolas, "Courier New", monospace; font-size: 12px; background: #f6f6f6; border: 1px solid #ddd; padding: 8px; overflow: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 6px 0 12px; }
+  th, td { border: 1px solid #ccc; padding: 4px 6px; text-align: left; vertical-align: top; }
+  th { background: #eee; }
+  .note { background: #fff8e1; border: 1px solid #f0d58c; padding: 8px 10px; margin: 10px 0; }
+  .muted { color: #666; }
+  ol li, ul li { margin: 2px 0; }
+</style>
+</head>
+<body>
+
+<h1>Now Playing Info</h1>
+<p class="muted">Control4 DriverWorks driver &middot; version 1.0 &middot; OS 3.1.3 or later</p>
+
+<p>Now Playing Info figures out <b>what is playing in a room</b> and shows a rich
+&ldquo;about what&rsquo;s playing&rdquo; page (poster, title, episode, synopsis, cast, ratings, progress)
+as a <b>button in Navigator</b>. It also exposes the information as <b>variables</b> and
+<b>events</b> for Composer programming (e.g. dim the lights when a movie starts).
+The driver is purely informational: it never controls playback.</p>
+
+<p>Contents: <a href="#sources">Sources</a> &middot; <a href="#keys">Metadata API keys</a> &middot;
+<a href="#button">Showing the button</a> &middot; <a href="#props">Properties</a> &middot;
+<a href="#actions">Actions</a> &middot; <a href="#vars">Variables</a> &middot; <a href="#events">Events</a> &middot;
+<a href="#programming">Programming examples</a> &middot; <a href="#limits">Limitations</a> &middot;
+<a href="#trouble">Troubleshooting</a> &middot; <a href="#credits">Attribution</a></p>
+
+<h2 id="quick">Quick start</h2>
+<ol>
+  <li>Add the driver to the room whose media you want to show (or set the <b>Room</b> property).</li>
+  <li>Fill in at least one source below. With no other source, the driver uses the Control4 room&rsquo;s own media information (on by default).</li>
+  <li>Optional but recommended: enter a free <b>TMDB API Key</b> (posters, synopsis, cast) and an <b>OMDb API Key</b> (IMDb / Rotten Tomatoes / Metacritic ratings).</li>
+  <li>Make the button visible in Navigator (see <a href="#button">Showing the button</a>) and refresh Navigators.</li>
+  <li>Run the action <b>Test Metadata Sources</b> and check the <b>Status</b> property.</li>
+</ol>
+
+<h2 id="sources">Sources (where &ldquo;what is playing&rdquo; comes from)</h2>
+<p>You can configure several sources at once; the driver shows the one that is playing
+(playing &gt; buffering &gt; paused &gt; stopped/idle &gt; off; ties go to Roku, then Apple TV, then Home Assistant, then Control4 room media).</p>
+
+<h3>Roku (Roku players and Roku TVs)</h3>
+<ul>
+  <li>Set <b>Roku Address</b> to the Roku&rsquo;s IP address (give it a DHCP reservation). Optional <b>Roku Name</b> is shown as the device name.</li>
+  <li>On the Roku: <b>Settings &rsaquo; System &rsaquo; Advanced system settings &rsaquo; Control by mobile apps &rsaquo; Network access = Default</b> (or Permissive). Otherwise the Roku answers &ldquo;403&rdquo; and the Status property says so.</li>
+  <li>Roku reports the <b>app</b> (Netflix, Hulu&hellip;) and <b>play / pause / position</b>, but <b>not the title</b>. For titles, also add the same Roku through Home Assistant and set <b>Home Assistant Entity Is = Same Device As Roku</b>. On a Roku TV&rsquo;s antenna input the channel and, when guide data is present, the program are shown.</li>
+</ul>
+
+<h3>Apple TV (via the companion bridge)</h3>
+<ul>
+  <li>Apple TV has no simple network API, so a small companion service, the <b>Apple TV bridge</b>, must run on an always-on computer on the same network (Raspberry Pi, NAS, Docker host). It ships with this driver&rsquo;s source in the <code>bridge/</code> folder; its README has the full steps:
+    <ol>
+      <li>Install: <code>pip install -r requirements.txt</code> (or <code>docker compose build</code>).</li>
+      <li>Find the device: <code>python -m atv_bridge scan</code>.</li>
+      <li>Pair (enter the PIN shown on the TV): <code>python -m atv_bridge pair "Living Room"</code>.</li>
+      <li>Run it: <code>python -m atv_bridge serve</code> (port 8765), optionally with <code>ATV_BRIDGE_TOKEN</code>.</li>
+    </ol></li>
+  <li>Driver properties: <b>Apple TV Bridge URL</b> = <code>http://&lt;bridge-ip&gt;:8765</code>, <b>Apple TV Device</b> = the device id, name or slug from <code>scan</code>, <b>Apple TV Bridge Token</b> = the token if you set one.</li>
+  <li>What you see depends on what the app publishes to the Apple TV&rsquo;s now-playing center: the Apple TV app and Music are complete, many apps send only a title, some send nothing.</li>
+</ul>
+
+<h3>Home Assistant (anything HA can see: Apple TV, Sonos, Plex, Kodi, Chromecast, Android TV, Roku&hellip;)</h3>
+<ul>
+  <li><b>Home Assistant URL</b> = <code>http://&lt;ha-ip&gt;:8123</code>.</li>
+  <li><b>Home Assistant Token</b>: in Home Assistant open your user profile &rsaquo; <b>Security</b> &rsaquo; <b>Long-lived access tokens</b> &rsaquo; Create token. Paste it here (it is stored as a password property).</li>
+  <li><b>Home Assistant Entity ID</b>: the <code>media_player.&hellip;</code> entity (Developer tools &rsaquo; States).</li>
+  <li><b>Home Assistant Entity Is</b>: <i>Separate Device</i>, or <i>Same Device As Roku / Apple TV</i> when the entity is the same physical box. The driver then merges HA&rsquo;s titles into the Roku/Apple TV source instead of treating them as two players.</li>
+</ul>
+
+<h3>Control4 room media</h3>
+<ul>
+  <li><b>Use Control4 Room Media = On</b> (default) reads the room&rsquo;s current media information that Control4 source drivers publish (title, artist, album, cover art), e.g. from Control4 music services or a media server.</li>
+  <li>Control4 does not publish play/pause for a room, so room media is shown as &ldquo;playing&rdquo; whenever the room is on and media information exists.</li>
+  <li><b>Show Only When Room Is On = On</b> shows &ldquo;off&rdquo; whenever the room is off, regardless of the other sources (and stops polling them meanwhile).</li>
+</ul>
+
+<h2 id="keys">Metadata API keys (optional)</h2>
+<table>
+  <tr><th>Service</th><th>What it adds</th><th>How to get a key</th></tr>
+  <tr><td><b>TMDB</b> (The Movie Database)</td><td>Posters, backdrops, logos, synopsis, tagline, cast &amp; crew, genres, runtime, content rating, episode details, trailers.</td>
+      <td>Free for non-commercial use: create an account at <span class="mono">themoviedb.org</span> &rsaquo; Settings &rsaquo; API. Paste either the <b>API Key</b> (v3) or the <b>API Read Access Token</b> (v4, starts with <code>eyJ</code>); the driver detects which.</td></tr>
+  <tr><td><b>OMDb</b></td><td>IMDb rating and votes, Rotten Tomatoes and Metacritic scores, awards. (IMDb has no public API; OMDb is the practical way to get these ratings.)</td>
+      <td><span class="mono">omdbapi.com</span> &rsaquo; API Key (free tier: 1,000 requests/day; the driver caches results).</td></tr>
+  <tr><td><b>Gracenote</b> (optional)</td><td>Live-TV program guide data (what is on a channel now) and an alternative title search.</td>
+      <td>Gracenote / TMS keys are licence-gated (commercial agreement). Leave empty if you do not have one. <b>Gracenote Lineup ID</b> (e.g. <code>USA-OTA22201-DEFAULT</code>) is needed for live TV.</td></tr>
+  <tr><td><b>Music Lookup</b></td><td>Album art, album year, genre, track list via Apple iTunes Search and MusicBrainz.</td><td>No key needed. Turn off with <b>Music Lookup = Off</b>.</td></tr>
+</table>
+<p><b>Metadata Language</b> (default <code>en-US</code>) and <b>Content Rating Country</b> (default <code>US</code>) control TMDB&rsquo;s language and which country&rsquo;s rating (PG-13, TV-MA, FSK 12&hellip;) is shown.</p>
+
+<h2 id="button">Showing the button in Navigator</h2>
+<ol>
+  <li>In Composer Pro, select the <b>room</b> in the project tree &rsaquo; <b>Navigators</b> tab.</li>
+  <li>Under <b>Watch</b> and/or <b>Listen</b>, find <b>Now Playing</b> (this driver&rsquo;s button) and make it <b>visible</b>; move it to the position you like.</li>
+  <li><b>Refresh Navigators</b> (File &rsaquo; Refresh Navigators, or from the Navigators view).</li>
+</ol>
+<p>Tapping the button opens the Now Playing page. The icon changes to a highlighted &ldquo;playing&rdquo; variant while something is playing.
+The page works on touch screens and in the Control4 app, including remotely: it receives its data through the Navigator, and artwork that lives on your LAN
+(Apple TV bridge, Home Assistant, NAS) is embedded by the controller (<b>Embed LAN Artwork = On</b>) so it also shows when the phone is away from home.</p>
+
+<h2 id="props">Properties</h2>
+<table>
+  <tr><th>Property</th><th>Default</th><th>Notes</th></tr>
+  <tr><td>Driver Version, Status, Active Source, Metadata Sources, Web View URL, LAN URL</td><td>&ndash;</td><td>Read-only. <b>Status</b> shows what is playing (&ldquo;Playing &mdash; The Bear (Netflix on Living Room Roku)&rdquo;) plus any per-source error.</td></tr>
+  <tr><td>Room</td><td>(empty)</td><td>Room to report on; empty = the room the driver is in.</td></tr>
+  <tr><td>Use Control4 Room Media</td><td>On</td><td>See Sources.</td></tr>
+  <tr><td>Show Only When Room Is On</td><td>Off</td><td>See Sources.</td></tr>
+  <tr><td>Roku Address, Roku Name</td><td>&ndash;</td><td>IP or hostname (port 8060 implied).</td></tr>
+  <tr><td>Apple TV Bridge URL, Apple TV Device, Apple TV Bridge Token</td><td>&ndash;</td><td>See Sources.</td></tr>
+  <tr><td>Home Assistant URL, Token, Entity ID, Entity Is</td><td>Separate Device</td><td>See Sources.</td></tr>
+  <tr><td>TMDB / OMDb / Gracenote API Key, Gracenote Lineup ID</td><td>&ndash;</td><td>Password fields; never written to logs.</td></tr>
+  <tr><td>Music Lookup</td><td>On</td><td>Keyless iTunes / MusicBrainz lookups for music.</td></tr>
+  <tr><td>Metadata Language, Content Rating Country</td><td>en-US, US</td><td></td></tr>
+  <tr><td>Poll Interval Playing / Idle</td><td>2 s / 5 s</td><td>How often sources are asked while something plays / while idle.</td></tr>
+  <tr><td>Embed LAN Artwork</td><td>On</td><td>Download LAN-only artwork on the controller (up to 256 KB per image) so remote apps can show it.</td></tr>
+  <tr><td>LAN Web Port</td><td>0 (off)</td><td>Optional: serve the page and <code>/api/state</code> JSON on <code>http://&lt;controller-ip&gt;:&lt;port&gt;/</code> for browsers/kiosks on the LAN. Unauthenticated, LAN only.</td></tr>
+  <tr><td>Debug Mode</td><td>Off</td><td>Print, Log, or Print and Log. Keys and tokens are redacted.</td></tr>
+</table>
+
+<h2 id="actions">Actions</h2>
+<table>
+  <tr><th>Action</th><th>What it does</th></tr>
+  <tr><td>Refresh Now</td><td>Ask all sources immediately.</td></tr>
+  <tr><td>Clear Metadata Cache</td><td>Forget cached TMDB/OMDb/music lookups and embedded artwork.</td></tr>
+  <tr><td>Print State</td><td>Prints every variable value and the per-source state to the Lua output window.</td></tr>
+  <tr><td>Print Room Media Info</td><td>Prints the room&rsquo;s raw media variables (incl. &ldquo;CURRENT MEDIA INFO&rdquo;) and how the driver parsed them. If room media shows wrong or empty, please send us this output.</td></tr>
+  <tr><td>Test Metadata Sources</td><td>Makes one small request to each configured source and metadata service and prints OK or the reason it failed.</td></tr>
+</table>
+<p>Programming command: <b>Refresh</b> (same as Refresh Now).</p>
+
+<h2 id="vars">Variables</h2>
+<p>Strings are empty and numbers 0 when unknown. Boolean variables are 1/0.</p>
+<table>
+  <tr><th>Variable</th><th>Type</th><th>Meaning</th></tr>
+  <tr><td>TITLE</td><td>String</td><td>Cleaned title (movie title, track title, series title for shows without an episode name).</td></tr>
+  <tr><td>SUBTITLE</td><td>String</td><td>Secondary line from the source.</td></tr>
+  <tr><td>MEDIA_KIND</td><td>String</td><td>movie, episode, music, live_tv, video, unknown.</td></tr>
+  <tr><td>SERIES_TITLE, SEASON, EPISODE, EPISODE_TITLE</td><td>String / Number</td><td>TV episode details.</td></tr>
+  <tr><td>ARTIST, ALBUM</td><td>String</td><td>Music.</td></tr>
+  <tr><td>CHANNEL_NAME, CHANNEL_NUMBER</td><td>String</td><td>Live TV.</td></tr>
+  <tr><td>APP_NAME</td><td>String</td><td>Netflix, Hulu, Music&hellip;</td></tr>
+  <tr><td>SOURCE_DEVICE, SOURCE_PROVIDER</td><td>String</td><td>Device name; provider roku / appletv / homeassistant / c4room.</td></tr>
+  <tr><td>PLAY_STATE</td><td>String</td><td>playing, paused, buffering, stopped, idle, off.</td></tr>
+  <tr><td>IS_PLAYING, IS_PAUSED, IS_LIVE</td><td>Boolean</td><td></td></tr>
+  <tr><td>POSITION_SECONDS, DURATION_SECONDS, PROGRESS_PERCENT</td><td>Number</td><td>Updated every 5 s while playing.</td></tr>
+  <tr><td>VOLUME</td><td>Number</td><td>0&ndash;100 when the source reports it.</td></tr>
+  <tr><td>YEAR, GENRES, CONTENT_RATING, RUNTIME_MINUTES</td><td>Number / String</td><td>From metadata.</td></tr>
+  <tr><td>OVERVIEW, TAGLINE</td><td>String</td><td>Synopsis (max 1000 bytes), tagline.</td></tr>
+  <tr><td>IMDB_ID, IMDB_RATING, IMDB_URL, ROTTEN_TOMATOES, METACRITIC</td><td>String / Number</td><td>Ratings (OMDb key needed for IMDb/RT/Metacritic).</td></tr>
+  <tr><td>DIRECTOR, CAST, NETWORK</td><td>String</td><td>Comma separated (top 5 cast).</td></tr>
+  <tr><td>POSTER_URL, BACKDROP_URL, ARTWORK_URL, LOGO_URL, TRAILER_URL</td><td>String</td><td>Image/trailer URLs (always the original http(s) URL).</td></tr>
+  <tr><td>DISPLAY_LINE_1, DISPLAY_LINE_2</td><td>String</td><td>Ready-made two-line summary, e.g. &ldquo;The Bear &mdash; S2&middot;E7 Forks&rdquo; / &ldquo;Hulu on Living Room Roku&rdquo;.</td></tr>
+  <tr><td>MEDIA_KEY</td><td>String</td><td>Identity of the current media (changes when the media changes).</td></tr>
+  <tr><td>VERSION, LAST_CHANGED</td><td>Number</td><td>Change counter; epoch seconds of the last change.</td></tr>
+  <tr><td>STATE_JSON</td><td>String</td><td>The full state document used by the Now Playing page (JSON, schema 1).</td></tr>
+</table>
+
+<h2 id="events">Events</h2>
+<table>
+  <tr><th>Event</th><th>Fires when</th></tr>
+  <tr><td>Media Changed</td><td>A different title/track/channel is identified.</td></tr>
+  <tr><td>Playback Started</td><td>Playback starts (from stopped/idle/off, or new media after a pause).</td></tr>
+  <tr><td>Playback Paused</td><td>Playing &rarr; paused.</td></tr>
+  <tr><td>Playback Resumed</td><td>Paused &rarr; playing, same media.</td></tr>
+  <tr><td>Playback Stopped</td><td>Playing or paused &rarr; stopped, idle or off.</td></tr>
+  <tr><td>Details Available</td><td>Metadata (poster, ratings, cast&hellip;) has been attached to the current media.</td></tr>
+  <tr><td>Source Changed</td><td>The active source device changes.</td></tr>
+  <tr><td>App Changed</td><td>The active app changes.</td></tr>
+  <tr><td>Movie Started / TV Episode Started / Music Track Started / Live TV Started</td><td>Media of that kind starts playing (once per title).</td></tr>
+</table>
+<p>Rebuffering does not fire stop/start events. After a driver restart the current state is reported once
+(e.g. Playback Started if something is already playing).</p>
+
+<h2 id="programming">Programming examples</h2>
+<pre>WHEN Now Playing Info  Movie Started
+  Living Room Lights  Ramp to level 10 over 5 seconds
+
+WHEN Now Playing Info  Playback Paused
+  IF Now Playing Info  MEDIA_KIND  equals  movie
+    Living Room Lights  Ramp to level 40 over 2 seconds
+
+WHEN Now Playing Info  Playback Stopped
+  Living Room Lights  Ramp to level 60 over 5 seconds
+
+WHEN Now Playing Info  Details Available
+  IF Now Playing Info  CONTENT_RATING  equals  R
+    Kids Room Keypad  LED 3  Set color red</pre>
+<p>Variables can also be used in conditionals and in custom text (e.g. a keypad engraving or an announcement with DISPLAY_LINE_1).</p>
+
+<h2 id="limits">Limitations (honest list)</h2>
+<ul>
+  <li><b>Roku</b> (ECP) reports the app and play/pause/position but no title. Combine it with Home Assistant for titles.</li>
+  <li><b>Apple TV</b>: some apps publish no metadata at all (only playing/paused). Live TV apps rarely give a channel.</li>
+  <li><b>Control4 room media</b> has no play/pause state; it is shown as playing while the room is on and media information exists.
+      The exact format of the room&rsquo;s &ldquo;CURRENT MEDIA INFO&rdquo; differs between source drivers; the parser is tolerant, but if titles are wrong use <b>Print Room Media Info</b>.</li>
+  <li>Metadata matching is by title (and year/season/episode when known); unusual titles, home videos and YouTube are deliberately not matched.</li>
+  <li>The web view on the <b>on-screen (TV) Navigator</b> is not supported by Control4 (undocumented); use touch screens and the Control4 app.</li>
+  <li>The <b>Gracenote</b> path is implemented to the published API but has not been tested against the live service.</li>
+  <li>Remote access: LAN artwork is embedded only up to 256 KB per image; larger images show on the LAN only.</li>
+  <li>The optional LAN web port has no authentication: only enable it on a trusted network.</li>
+</ul>
+
+<h2 id="trouble">Troubleshooting</h2>
+<table>
+  <tr><th>Symptom</th><th>Check</th></tr>
+  <tr><td>Status: &ldquo;Not configured&rdquo;</td><td>Enter a source, or set Use Control4 Room Media = On.</td></tr>
+  <tr><td>Status: &ldquo;Roku ECP access denied (HTTP 403)&rdquo;</td><td>On the Roku set Control by mobile apps &rsaquo; Network access = Default/Permissive.</td></tr>
+  <tr><td>Status: &ldquo;Roku unreachable&rdquo; / &ldquo;bridge: &hellip;&rdquo;</td><td>IP address changed? Use DHCP reservations. Is the bridge running (<code>http://&lt;bridge&gt;:8765/v1/health</code>)?</td></tr>
+  <tr><td>Home Assistant 401</td><td>Create a new long-lived token; HA may temporarily ban an IP after failed logins.</td></tr>
+  <tr><td>No posters / synopsis</td><td>Run <b>Test Metadata Sources</b>; check the TMDB key and that the controller can reach the internet.</td></tr>
+  <tr><td>Wrong movie matched</td><td>Run <b>Clear Metadata Cache</b>; very generic titles may match the wrong film. Send us <b>Print State</b> output.</td></tr>
+  <tr><td>Button missing in Navigator</td><td>Make it visible under the room&rsquo;s Watch/Listen menus and refresh Navigators.</td></tr>
+  <tr><td>Page shows &ldquo;reconnecting&rdquo;</td><td>The Navigator did not get data; check the driver is running (Status) and refresh Navigators.</td></tr>
+  <tr><td>Anything else</td><td>Set Debug Mode = Print, reproduce, and send the Lua output (keys are redacted).</td></tr>
+</table>
+
+<h2 id="credits">Attribution</h2>
+<p><b>This product uses the TMDB API but is not endorsed or certified by TMDB.</b>
+Movie and TV metadata and images are provided by <span class="mono">themoviedb.org</span>.
+Ratings via OMDb (<span class="mono">omdbapi.com</span>). Music data from the Apple iTunes Search API and MusicBrainz (CC0).
+Gracenote is a trademark of Gracenote, Inc. Roku, Apple TV, Home Assistant and Control4 are trademarks of their respective owners;
+this driver is not affiliated with or endorsed by them.</p>
+
+</body>
+</html>

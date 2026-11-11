@@ -5,19 +5,22 @@ Zero-dependency test runner (Lua 5.1 / LuaJIT).
   lua tests/run.lua engine util     run specs whose file name contains any of the words
   luajit tests/run.lua -v           verbose (print each test)
 
-Specs live in tests/spec/*_spec.lua and use the globals describe/it/before_each plus the
+Specs live in tests/spec/*_spec.lua (core) and tests/c4/*_spec.lua (Control4 glue) and use the globals describe/it/before_each plus the
 assertion helpers in `T` (passed as the spec chunk's first argument and also global `T`).
 ]]
 
 local script = arg and arg[0] or "tests/run.lua"
 local tests_dir = script:match("^(.*)[/\\][^/\\]*$") or "."
 local root = tests_dir .. "/.."
-package.path = root .. "/driver/?.lua;" .. root .. "/tests/?.lua;" .. package.path
+package.path = root .. "/driver/?.lua;" .. root .. "/tests/?.lua;" .. root .. "/tests/c4/?.lua;" .. package.path
 
 local SPECS = {
   "json_spec", "util_spec", "playback_spec", "net_spec", "roku_spec", "homeassistant_spec",
   "bridge_static_spec", "multi_spec", "tmdb_spec", "omdb_spec", "gracenote_spec", "music_spec",
   "pipeline_spec", "schema_spec", "flatten_spec", "engine_spec",
+  -- Control4 glue (tests/c4/): pure modules, then the real driver.lua against the C4 mock
+  "c4/static_spec", "c4/config_spec", "c4/events_spec", "c4/room_spec", "c4/artwork_spec",
+  "c4/httpserver_spec", "c4/driver_spec",
 }
 
 local verbose = false
@@ -153,7 +156,9 @@ local t0 = os.clock()
 for _, name in ipairs(SPECS) do
   if selected(name) then
     if verbose then print(name) end
-    local chunk, lerr = loadfile(root .. "/tests/spec/" .. name .. ".lua")
+    local file = name:find("/", 1, true) and (root .. "/tests/" .. name .. ".lua")
+      or (root .. "/tests/spec/" .. name .. ".lua")
+    local chunk, lerr = loadfile(file)
     if not chunk then
       results.failed = results.failed + 1
       results.failures[#results.failures + 1] = { name = name, err = "load error: " .. tostring(lerr) }

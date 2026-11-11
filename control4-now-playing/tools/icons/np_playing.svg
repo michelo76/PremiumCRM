@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Now Playing Info: "playing" state. Same geometry, warm accent, taller bars. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a2a14"/>
+      <stop offset="1" stop-color="#141009"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f6cf86"/>
+      <stop offset="1" stop-color="#e0a14a"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <rect x="16.5" y="16.5" width="479" height="479" rx="111.5" fill="none" stroke="#f6cf86" stroke-opacity="0.35" stroke-width="3"/>
+  <g fill="url(#bar)">
+    <rect x="110" y="214" width="52" height="182" rx="26"/>
+    <rect x="190" y="130" width="52" height="266" rx="26"/>
+    <rect x="270" y="250" width="52" height="146" rx="26"/>
+  </g>
+  <circle cx="376" cy="150" r="30" fill="#f6cf86"/>
+  <rect x="350" y="214" width="52" height="182" rx="26" fill="url(#bar)"/>
+</svg>
