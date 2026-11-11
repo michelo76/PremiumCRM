@@ -112,9 +112,12 @@ The mapping code is in `atv_bridge/mapping.py`, a pure function covered by unit 
 * **volume**: 0–100 as pyatv reports it, when the Volume feature is available (usually
   it isn't on Apple TV: volume belongs to the TV or receiver). Otherwise `null`.
 * **artwork_url**: an absolute URL built from the request's `Host` header, ending in
-  `?v=<16-hex hash of pyatv's artwork id>`. When a token is configured it also carries
-  `&token=…`, because Control4 navigators fetch images directly and cannot send
-  headers. It is `null` when there is no artwork.
+  `?v=<16-hex hash of pyatv's artwork id>`. It never carries the token (the URL is copied
+  into Control4 variables, the state JSON and logs). With a token configured, the artwork
+  endpoint accepts either the token (header or `?token=`) or a `v` equal to the version it
+  serves, so an `<img>` on the LAN can load it without headers; any other request is 401.
+  The Control4 driver sends the token as a header when it fetches artwork for remote
+  Navigators. It is `null` when there is no artwork.
 * pyatv does not expose `app_icon_url`, `album_artist`, `track_number`, `channel_*` or
   `year`, so they are always `null`. `genres` holds pyatv's single genre, when one is
   reported.
@@ -197,7 +200,9 @@ backend), token auth, slug resolution, and per-device state and the artwork cach
 The bridge is **LAN-only and unauthenticated by default**. Anyone who can reach port
 8765 can read what is playing. Do not expose it to the internet. Set a token
 (`ATV_BRIDGE_TOKEN`), which clients send as `Authorization: Bearer <token>` or
-`?token=<token>`, and bind to a specific interface where possible. The token is sent
+`?token=<token>`, and bind to a specific interface where possible. Exception: the
+current artwork image is also served to anyone presenting its `?v=` version (a 64-bit
+hash only published in `now-playing` responses), so web views can show it. The token is sent
 in plain HTTP, so treat it as a light LAN guard, not real security. Access logs never
 include query strings. `pyatv.json` holds pairing credentials: keep it at mode 600
 and back it up like a password.

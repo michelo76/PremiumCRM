@@ -179,12 +179,26 @@ async def test_health_is_public_with_token(auth_client):
     assert (await auth_client.get("/v1/health")).status == 200
 
 
-async def test_artwork_url_carries_token_when_auth_enabled(auth_client):
+async def test_artwork_url_never_carries_token_but_loads_without_one(auth_client):
     body = await (
         await auth_client.get("/v1/devices/living-room/now-playing?token=s3cret")
     ).json()
     url = body["media"]["artwork_url"]
-    assert url.endswith("/artwork?v=abc123&token=s3cret")
+    assert url.endswith("/artwork?v=abc123")
+    assert "s3cret" not in url and "token" not in url
     path = url.split("://", 1)[1].split("/", 1)[1]
+    # an <img> in the Control4 web view cannot send headers: the versioned URL is enough
     resp = await auth_client.get("/" + path)
     assert resp.status == 200
+    assert await resp.read() == PNG
+
+
+async def test_artwork_without_token_needs_the_current_version(auth_client):
+    assert (await auth_client.get("/v1/devices/living-room/artwork")).status == 401
+    assert (await auth_client.get("/v1/devices/living-room/artwork?v=guess")).status == 401
+    assert (await auth_client.get("/v1/devices/bedroom/artwork?v=abc123")).status == 401
+    ok = await auth_client.get(
+        "/v1/devices/living-room/artwork", headers={"Authorization": "Bearer s3cret"}
+    )
+    assert ok.status == 200
+    assert (await auth_client.get("/v1/devices/living-room/artwork?v=old&token=s3cret")).status == 200

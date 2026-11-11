@@ -9,7 +9,9 @@ c4.config -- driver Properties -> np.engine config. Pure (no C4 calls): unit-tes
       sources    = { "Roku", ... },    enrichers = { "TMDB", ... },
       warnings   = { "...", ... },     -- half-configured sources etc.
       room_media = bool, gate = bool, gated = bool (room is off and gating is on),
-      embed_artwork = bool, lan_port = n, debug_mode = "Off"|...,
+      embed_artwork = bool,       -- answer the page's GET_ARTWORK requests ("Embed LAN Artwork")
+      artwork_auth = { { prefix, headers } } | nil,   -- headers for artwork under the bridge URL
+      lan_port = n, debug_mode = "Off"|...,
       secrets = { ... },          -- token/key strings to redact from logs
       watch_room = bool,          -- room variables must be watched
     }
@@ -129,6 +131,8 @@ function M.build(Properties, ctx)
     }
     info.sources[#info.sources + 1] = "Apple TV"
     info.appletv_base = atv_base
+    -- GET_ARTWORK downloads of bridge artwork carry the token as a header (never in a URL)
+    info.artwork_auth = { { prefix = atv_base .. "/", headers = atv_token and { Authorization = headers.Authorization } or {} } }
   elseif atv_base or atv_dev then
     info.warnings[#info.warnings + 1] = atv_base and "Apple TV Device is empty"
       or "Apple TV Bridge URL is empty or invalid"

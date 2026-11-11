@@ -103,8 +103,9 @@ The driver is purely informational: it never controls playback.</p>
   <li><b>Refresh Navigators</b> (File &rsaquo; Refresh Navigators, or from the Navigators view).</li>
 </ol>
 <p>Tapping the button opens the Now Playing page. The icon changes to a highlighted &ldquo;playing&rdquo; variant while something is playing.
-The page works on touch screens and in the Control4 app, including remotely: it receives its data through the Navigator, and artwork that lives on your LAN
-(Apple TV bridge, Home Assistant, NAS) is embedded by the controller (<b>Embed LAN Artwork = On</b>) so it also shows when the phone is away from home.</p>
+The page works on touch screens and in the Control4 app, including remotely: it receives its data through the Navigator. Artwork that lives on your LAN
+(Roku app icons, Apple TV bridge, Home Assistant, NAS) cannot be reached by a phone away from home, so the page asks the controller for it and the controller
+sends that one image back (<b>Embed LAN Artwork = On</b>). Only images of what is currently playing are fetched this way.</p>
 
 <h2 id="props">Properties</h2>
 <table>
@@ -120,7 +121,7 @@ The page works on touch screens and in the Control4 app, including remotely: it 
   <tr><td>Music Lookup</td><td>On</td><td>Keyless iTunes / MusicBrainz lookups for music.</td></tr>
   <tr><td>Metadata Language, Content Rating Country</td><td>en-US, US</td><td></td></tr>
   <tr><td>Poll Interval Playing / Idle</td><td>2 s / 5 s</td><td>How often sources are asked while something plays / while idle.</td></tr>
-  <tr><td>Embed LAN Artwork</td><td>On</td><td>Download LAN-only artwork on the controller (up to 256 KB per image) so remote apps can show it.</td></tr>
+  <tr><td>Embed LAN Artwork</td><td>On</td><td>Let the page ask the controller for LAN-only artwork (up to 256 KB per image, last 12 cached) so remote apps can show it. Off: remote apps show generated artwork instead.</td></tr>
   <tr><td>LAN Web Port</td><td>0 (off)</td><td>Optional: serve the page and <code>/api/state</code> JSON on <code>http://&lt;controller-ip&gt;:&lt;port&gt;/</code> for browsers/kiosks on the LAN. Unauthenticated, LAN only.</td></tr>
   <tr><td>Debug Mode</td><td>Off</td><td>Print, Log, or Print and Log. Keys and tokens are redacted.</td></tr>
 </table>
@@ -129,7 +130,7 @@ The page works on touch screens and in the Control4 app, including remotely: it 
 <table>
   <tr><th>Action</th><th>What it does</th></tr>
   <tr><td>Refresh Now</td><td>Ask all sources immediately.</td></tr>
-  <tr><td>Clear Metadata Cache</td><td>Forget cached TMDB/OMDb/music lookups and embedded artwork.</td></tr>
+  <tr><td>Clear Metadata Cache</td><td>Forget cached TMDB/OMDb/music lookups and artwork fetched for the page.</td></tr>
   <tr><td>Print State</td><td>Prints every variable value and the per-source state to the Lua output window.</td></tr>
   <tr><td>Print Room Media Info</td><td>Prints the room&rsquo;s raw media variables (incl. &ldquo;CURRENT MEDIA INFO&rdquo;) and how the driver parsed them. If room media shows wrong or empty, please send us this output.</td></tr>
   <tr><td>Test Metadata Sources</td><td>Makes one small request to each configured source and metadata service and prints OK or the reason it failed.</td></tr>
@@ -176,8 +177,9 @@ The page works on touch screens and in the Control4 app, including remotely: it 
   <tr><td>App Changed</td><td>The active app changes.</td></tr>
   <tr><td>Movie Started / TV Episode Started / Music Track Started / Live TV Started</td><td>Media of that kind starts playing (once per title).</td></tr>
 </table>
-<p>Rebuffering does not fire stop/start events. After a driver restart the current state is reported once
-(e.g. Playback Started if something is already playing).</p>
+<p>Rebuffering does not fire stop/start events. Events describe changes only: the state found when the driver starts
+(controller reboot, driver update) is taken as the starting point and fires nothing, so a reboot during a movie does not re-run
+&ldquo;Movie Started&rdquo; programming. Details Available may fire once after a restart when metadata arrives.</p>
 
 <h2 id="programming">Programming examples</h2>
 <pre>WHEN Now Playing Info  Movie Started
@@ -204,7 +206,8 @@ WHEN Now Playing Info  Details Available
   <li>Metadata matching is by title (and year/season/episode when known); unusual titles, home videos and YouTube are deliberately not matched.</li>
   <li>The web view on the <b>on-screen (TV) Navigator</b> is not supported by Control4 (undocumented); use touch screens and the Control4 app.</li>
   <li>The <b>Gracenote</b> path is implemented to the published API but has not been tested against the live service.</li>
-  <li>Remote access: LAN artwork is embedded only up to 256 KB per image; larger images show on the LAN only.</li>
+  <li>Remote access: LAN artwork is relayed by the controller only up to 256 KB per image; larger images show on the LAN only
+      (remote apps show generated artwork). Internet images (TMDB, iTunes&hellip;) load directly.</li>
   <li>The optional LAN web port has no authentication: only enable it on a trusted network.</li>
 </ul>
 

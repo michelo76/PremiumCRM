@@ -169,6 +169,9 @@ function indexPage() {
  * Fake Control4 Navigator JS API, injected into index.html when the page URL has ?c4mock=1.
  * Mimics the driver side of the protocol: GET_STATE -> push full state; push again on every version change.
  * Rotates through several payload wrapper shapes to exercise the page's extractState().
+ * GET_ARTWORK {url} -> onDataToUi({NOW_PLAYING_ARTWORK: {url, data}}) like c4/app.lua: only image URLs
+ * of the last pushed state are served (else {url, error}); same-origin URLs (/_mock/img/...) are
+ * fetched and inlined as data: URIs, unreachable LAN URLs get a generated local image.
  * ?c4drop=N  ignores the first N GET_STATE commands (tests the no-response -> retry path).
  * /_mock/fail?on=1 makes the fake driver go silent (no pushes, no replies).
  * window.__c4log records calls for tests.
@@ -176,13 +179,30 @@ function indexPage() {
 const C4_MOCK = '(' + function () {
   var q = {};
   location.search.replace(/^\?/, '').split('&').forEach(function (p) { var i = p.indexOf('='); if (i > 0) q[p.slice(0, i)] = decodeURIComponent(p.slice(i + 1)); });
-  var drop = +(q.c4drop || 0), shape = 0, lastV = null, timer = null;
+  var drop = +(q.c4drop || 0), shape = 0, lastV = null, timer = null, lastState = null;
   var log = window.__c4log = [];
   function api() { return '/api/state' + (q.fixture ? '?fixture=' + encodeURIComponent(q.fixture) : ''); }
   function fetchState(cb) {
     fetch(api(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(cb, function () { cb(null); });
   }
+  function stateImages(st) {
+    var d = (st && st.details) || {}, out = [];
+    [st && st.media && st.media.artwork_url, st && st.source && st.source.app_icon_url, d.poster_url, d.backdrop_url, d.logo_url,
+      d.music && d.music.artist_image_url, d.episode && d.episode.still_url].forEach(function (u) { if (typeof u === 'string' && u) out.push(u); });
+    return out;
+  }
+  function artwork(url) {
+    function reply(x) { log.push('artwork:' + url + ':' + (x.data ? 'data' : x.error)); window.onDataToUi({ NOW_PLAYING_ARTWORK: x }); }
+    if (stateImages(lastState).indexOf(url) < 0) return reply({ url: url, error: 'not in current state' });
+    var local = /^\//.test(url) ? url : '/_mock/img/600x600/lan-' + url.length + '.svg?label=LAN';
+    fetch(local).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); }).then(function (b) {
+      var fr = new FileReader();
+      fr.onload = function () { reply({ url: url, data: String(fr.result).replace(/^data:image\/svg\+xml(;charset=[^;,]+)?/, 'data:image/svg+xml') }); };
+      fr.readAsDataURL(b);
+    }).catch(function (e) { reply({ url: url, error: String(e && e.message || e) }); });
+  }
   function deliver(st) {
+    lastState = st;
     var json = JSON.stringify(st), s = shape++ % 5;
     log.push('push:' + s + ':' + st.version);
     if (s === 0) window.onVariable(JSON.stringify({ name: 'STATE_JSON', value: json }));
@@ -197,6 +217,7 @@ const C4_MOCK = '(' + function () {
     subscribeToVariable: function (n, b) { log.push('subscribeToVariable:' + n + ':' + b); },
     sendCommand: function (name, params, async, proto) {
       log.push('sendCommand:' + name + ':' + params + ':' + async + ':' + proto);
+      if (name === 'GET_ARTWORK') { try { artwork(JSON.parse(params).url); } catch (e) { log.push('bad GET_ARTWORK'); } return; }
       if (name !== 'GET_STATE') return;
       if (drop > 0) { drop--; log.push('dropped'); return; }
       fetchState(function (st) { if (st) { lastV = st.version; deliver(st); } });

@@ -42,6 +42,8 @@ BACKEND_KEY: "web.AppKey[Backend]" = web.AppKey("backend")
 TOKEN_KEY: "web.AppKey[Optional[str]]" = web.AppKey("token")
 STARTED_KEY: "web.AppKey[float]" = web.AppKey("started")
 PUBLIC_PATHS = {"/v1/health"}
+# Artwork is authorized in its handler: a token OR the current version (a capability URL).
+ARTWORK_ROUTE = "/v1/devices/{id}/artwork"
 
 
 class RedactingAccessLogger(AbstractAccessLogger):
@@ -62,6 +64,19 @@ def _error(status: int, code: str, message: str) -> web.Response:
     return web.json_response({"error": code, "message": message}, status=status)
 
 
+def _authorized(request: web.Request) -> bool:
+    expected = request.app[TOKEN_KEY]
+    if not expected:
+        return True
+    presented = _presented_token(request) or ""
+    return hmac.compare_digest(presented.encode(), expected.encode())
+
+
+def _is_artwork(request: web.Request) -> bool:
+    info = request.match_info.route.resource
+    return info is not None and getattr(info, "canonical", None) == ARTWORK_ROUTE
+
+
 def _presented_token(request: web.Request) -> Optional[str]:
     header = request.headers.get("Authorization", "")
     if header[:7].lower() == "bearer ":
@@ -71,10 +86,8 @@ def _presented_token(request: web.Request) -> Optional[str]:
 
 @web.middleware
 async def auth_middleware(request: web.Request, handler: Handler) -> web.StreamResponse:
-    expected = request.app[TOKEN_KEY]
-    if expected and request.path not in PUBLIC_PATHS:
-        presented = _presented_token(request) or ""
-        if not hmac.compare_digest(presented.encode(), expected.encode()):
+    if request.path not in PUBLIC_PATHS and not _is_artwork(request):
+        if not _authorized(request):
             return _error(401, "unauthorized", "missing or invalid token")
     return await handler(request)
 
@@ -98,11 +111,9 @@ def _resolve(request: web.Request) -> DeviceSummary:
 
 
 def artwork_url(request: web.Request, device_id: str, version: str) -> str:
+    # Never carries the token: the URL ends up in Control4 variables, the state JSON and
+    # logs. Browsers that cannot send headers load it as a capability URL (see artwork()).
     params = {"v": version}
-    token = request.app[TOKEN_KEY]
-    if token:
-        # Control4 navigators fetch images directly and cannot send headers.
-        params["token"] = token
     base = f"{request.scheme}://{request.host}"
     return f"{base}/v1/devices/{quote(device_id, safe='')}/artwork?{urlencode(params)}"
 
@@ -137,12 +148,23 @@ async def now_playing(request: web.Request) -> web.Response:
 
 
 async def artwork(request: web.Request) -> web.Response:
-    device = _resolve(request)
+    """Artwork bytes. With a token configured, a request is allowed when it carries the
+    token, or when its ?v= equals the artwork version served (16 hex chars of a hash of
+    pyatv's artwork id, published only in now-playing responses): image tags in the
+    Control4 web view cannot send headers, and a token in the URL would leak into
+    variables and logs."""
+    authorized = _authorized(request)
     requested = request.query.get("v")
+    if not authorized and not requested:
+        return _error(401, "unauthorized", "missing or invalid token")
+    device = _resolve(request)
     result = await request.app[BACKEND_KEY].artwork(device.id, requested)
     if result is None:
-        return _error(404, "no_artwork", "no artwork available")
+        return _error(404 if authorized else 401, "no_artwork" if authorized else "unauthorized",
+                      "no artwork available" if authorized else "missing or invalid token")
     version, art = result
+    if not authorized and requested != version:
+        return _error(401, "unauthorized", "missing or invalid token")
     cache = (
         "public, max-age=86400"
         if requested and requested == version
@@ -163,5 +185,5 @@ def create_app(backend: Backend, token: Optional[str] = None) -> web.Application
     app.router.add_get("/v1/health", health)
     app.router.add_get("/v1/devices", list_devices)
     app.router.add_get("/v1/devices/{id}/now-playing", now_playing)
-    app.router.add_get("/v1/devices/{id}/artwork", artwork)
+    app.router.add_get(ARTWORK_ROUTE, artwork)
     return app

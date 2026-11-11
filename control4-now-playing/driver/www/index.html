@@ -61,10 +61,11 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
 .mode-idle .bg-scrim{background:linear-gradient(90deg,rgba(11,11,13,.5),rgba(11,11,13,0) 70%)}
 
 /* ---------- connection indicator ---------- */
-.conn{position:fixed;top:.85rem;right:.85rem;z-index:30;display:flex;align-items:center;padding:.4rem .85rem .4rem .7rem;border-radius:2rem;
+/* top centre: never over the room name (left) or the clock (right) of the top bar */
+.conn{position:fixed;top:.85rem;left:50%;z-index:30;display:flex;align-items:center;padding:.4rem .85rem .4rem .7rem;border-radius:2rem;white-space:nowrap;
   background:rgba(22,22,25,.92);border:1px solid var(--line);font-size:.78rem;letter-spacing:.05em;color:var(--fg2);
-  opacity:0;-webkit-transform:translateY(-.6rem);transform:translateY(-.6rem);transition:opacity .4s ease,transform .4s ease;pointer-events:none}
-.conn.is-on{opacity:1;-webkit-transform:none;transform:none}
+  opacity:0;-webkit-transform:translate(-50%,-.6rem);transform:translate(-50%,-.6rem);transition:opacity .4s ease,transform .4s ease;pointer-events:none}
+.conn.is-on{opacity:1;-webkit-transform:translate(-50%,0);transform:translate(-50%,0)}
 .conn-dot{width:.5rem;height:.5rem;border-radius:50%;background:#e8a33d;margin-right:.55rem;animation:pulse 1.4s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
 
@@ -95,6 +96,8 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
 /* ---------- hero ---------- */
 .hero{display:flex;flex-direction:column;justify-content:flex-end;min-height:calc(100vh - 3.4rem);padding:2rem var(--pad) 2.6rem}
 .no-photo .hero{justify-content:center}
+/* when sections follow, leave a peek of the first one (rule + heading) above the fold */
+.has-sections .hero{min-height:calc(100vh - 3.4rem - 6.25rem);padding-bottom:1.6rem}
 .hero-inner{display:flex;align-items:flex-end}
 .art{flex:0 0 auto;width:17.5rem;margin-right:3rem;position:relative}
 .art:before{content:"";display:block;padding-top:150%}
@@ -298,6 +301,9 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
 .kiosk .foot-brand{display:none}
 .kiosk .foot-attr div{display:inline}
 .kiosk .foot-attr div+div:before{content:" \2014  "}
+
+/* tall landscape screens (1080p wall tablets / TVs): bigger artwork fills the hero */
+@media (orientation:landscape) and (min-height:1000px){.art{width:20rem}.art.is-square{width:25rem}.art.is-wide{width:30rem}}
 
 /* ---------- tablet portrait / narrow ---------- */
 @media (orientation:portrait) and (min-width:641px){
@@ -563,7 +569,55 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
   function loadFirst(list, wantCors, cb, i) {
     i = i || 0;
     if (i >= list.length) return cb(null);
-    loadImg(list[i], wantCors, function (im, cors) { if (im) cb(im, list[i], cors); else loadFirst(list, wantCors, cb, i + 1); });
+    loadArt(list[i], wantCors, function (im, cors) { if (im) cb(im, list[i], cors); else loadFirst(list, wantCors, cb, i + 1); });
+  }
+
+  // ------------------------------------------------------------------ driver-fetched artwork (Navigator only)
+  // A remote Navigator cannot reach LAN images (Roku icons, Home Assistant / Apple TV bridge artwork).
+  // The state keeps original URLs; the page asks the driver for a data: URI when the host is private-LAN
+  // or relative (same rule as c4/artwork.lua is_lan) or when loading the URL directly failed:
+  //   C4.sendCommand('GET_ARTWORK', '{"url":...}') -> onDataToUi(... {url, data} | {url, error})
+  // One request per URL, results cached by URL. Not used in HTTP/LAN mode (same LAN as the images).
+  function isLan(u) {
+    u = str(u);
+    if (!u || /^data:/i.test(u)) return false;
+    var m = /^[a-z][\w+.-]*:\/\/([^\/?#]+)/i.exec(u);
+    if (!m) return true; // relative: only resolvable on the LAN
+    var host = m[1].replace(/^.*@/, ''), v6 = /^\[([^\]]+)\]/.exec(host);
+    host = (v6 ? v6[1] : host.replace(/:\d+$/, '')).toLowerCase();
+    if (host === 'localhost' || /\.(local|lan|home\.arpa)$/.test(host)) return true;
+    var o = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(host);
+    if (o) {
+      var a = +o[1], b = +o[2];
+      return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+    }
+    if (host.indexOf(':') >= 0) return host === '::1' || /^f[cd]/.test(host) || /^fe[89ab]/.test(host);
+    return host.indexOf('.') < 0; // single-label host ("nas", "homeassistant")
+  }
+  var art = { data: {}, wait: {}, failed: {} };
+  function artHelp() { return c4.active; }
+  function askArt(src, cb) {
+    if (art.data[src]) return cb(art.data[src]);
+    if (art.failed[src] && Date.now() < art.failed[src]) return cb(null);
+    if (art.wait[src]) { art.wait[src].push(cb); return; }
+    art.wait[src] = [cb];
+    try { W.C4.sendCommand('GET_ARTWORK', JSON.stringify({ url: src }), true, false); } catch (e) { /* host not ready */ }
+    setTimeout(function () { if (art.wait[src]) artReply({ url: src, error: 'timeout' }); }, 12000);
+  }
+  function artReply(r) {
+    var src = str(r.url), d = typeof r.data === 'string' && /^data:image\//i.test(r.data) ? r.data : '';
+    if (!src) return;
+    if (d) art.data[src] = d; else art.failed[src] = Date.now() + 60000;
+    var list = art.wait[src] || []; delete art.wait[src];
+    list.forEach(function (cb) { try { cb(d || null); } catch (e) { /* ignore */ } });
+  }
+  // loadImg with driver help: cb(img|null, cors). LAN URLs go through the driver straight away;
+  // other URLs are tried directly first and fetched by the driver only if that fails.
+  function loadArt(src, wantCors, cb) {
+    if (!artHelp()) return loadImg(src, wantCors, cb);
+    function viaDriver() { askArt(src, function (d) { if (d) loadImg(d, wantCors, cb); else cb(null); }); }
+    if (art.data[src] || isLan(src)) return viaDriver();
+    loadImg(src, wantCors, function (im, cors) { if (im) cb(im, cors); else viaDriver(); });
   }
 
   // Crossfading layer stack: show(key, node) fades the new node in over the previous one.
@@ -704,7 +758,7 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
     if (!photo) { bodyCls.add('no-photo'); bgFader.show('gen:' + M.kind, genBackdrop()); return; }
     bodyCls.remove('no-photo');
     if (bgFader.key === 'photo:' + photo) { bgState.photo = 'ok'; return; }
-    loadImg(photo, false, function (im) {
+    loadArt(photo, false, function (im) {
       if (token !== artToken) return;
       if (!im) { bgState.photo = 'none'; bodyCls.add('no-photo'); softBackdrop(); return; }
       bgState.photo = 'ok';
@@ -809,7 +863,7 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
     tw.appendChild(h1);
     var logo = url(d.logo_url);
     if (logo) {
-      loadImg(logo, false, function (im) {
+      loadArt(logo, false, function (im) {
         if (!im || curKey !== M.key) return;
         im.className = 'logo'; tw.appendChild(im); tw.classList.add('has-logo');
       });
@@ -842,7 +896,8 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
       items = [badge(str(d.content_rating)), strs(d.networks)[0], span, genresOf(M, 2)];
     } else if (kind === 'music') {
       var mu = obj(d.music), tn = num(m.track_number), tracks = arr(mu.album_tracks);
-      items = [str(mu.track_genre) || genresOf(M, 2), tn ? 'Track ' + tn + (tracks.length ? ' of ' + tracks.length : '') : '', str(mu.label)];
+      // "of N" only when consistent (a truncated / different edition track list must not say "Track 9 of 4")
+      items = [str(mu.track_genre) || genresOf(M, 2), tn ? 'Track ' + tn + (tracks.length >= tn ? ' of ' + tracks.length : '') : '', str(mu.label)];
     } else if (kind === 'live_tv') items = [badge(str(d.content_rating)), genresOf(M, 2), strs(d.networks)[0] !== str(m.channel_name) ? strs(d.networks)[0] : ''];
     else items = [year ? String(year) : '', badge(str(d.content_rating)), genresOf(M, 3), kind === 'video' && dur ? fmtRuntime(dur / 60) : ''];
     body.appendChild(metaRow(items) || el('span'));
@@ -1030,6 +1085,7 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
 
   function buildSections(M) {
     var box = clear($('sections'));
+    bodyCls.remove('has-sections');
     if (!M.d || KIOSK) return;
     var parts = [];
     if (M.kind === 'episode') parts.push(episodeSection(M));
@@ -1038,6 +1094,7 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
     parts.push(castSection(M));
     parts.push(factsSection(M));
     parts.forEach(function (p) { if (p) box.appendChild(p); });
+    bodyCls.toggle('has-sections', !!box.firstChild);
   }
 
   function buildFooter(M) {
@@ -1071,9 +1128,11 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
     if (es.getAttribute('data-k') !== srcKey) {
       es.setAttribute('data-k', srcKey); clear(es);
       if (M.appIcon) {
-        var ic = new Image(); ic.className = 'app-icon'; ic.alt = '';
-        ic.onerror = function () { if (ic.parentNode) ic.parentNode.removeChild(ic); };
-        ic.src = M.appIcon; es.appendChild(ic);
+        var want = srcKey;
+        loadArt(M.appIcon, false, function (ic) {
+          if (!ic || es.getAttribute('data-k') !== want) return;
+          ic.className = 'app-icon'; ic.alt = ''; es.insertBefore(ic, es.firstChild);
+        });
       }
       [M.device, M.app].filter(Boolean).forEach(function (t, i) {
         if (i) es.appendChild(el('i', 'sep'));
@@ -1210,30 +1269,38 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
   }
 
   // ------------------------------------------------------------------ transport (a): Control4 Navigator
-  function extractState(x, depth) {
+  // Finds the payload inside whatever wrapper the host uses, routed by shape:
+  // has `schema` + `playback` -> state document; has `url` + (`data` | `error`) -> artwork reply.
+  function extractPayload(x, depth) {
     depth = depth || 0;
     if (depth > 6 || x == null) return null;
     if (typeof x === 'string') {
       var s = x.trim();
       if (s.charAt(0) !== '{' && s.charAt(0) !== '[' && s.charAt(0) !== '"') return null;
-      try { return extractState(JSON.parse(s), depth + 1); } catch (e) { return null; }
+      try { return extractPayload(JSON.parse(s), depth + 1); } catch (e) { return null; }
     }
     if (typeof x !== 'object') return null;
-    if (!Array.isArray(x) && (x.schema === 1 || x.schema === '1') && isObj(x.playback)) return x;
+    if (!Array.isArray(x)) {
+      if ((x.schema === 1 || x.schema === '1') && isObj(x.playback)) return { state: x };
+      if (typeof x.url === 'string' && (typeof x.data === 'string' || typeof x.error === 'string') && x.schema == null) return { art: x };
+    }
     var keys = Object.keys(x);
     // Prefer well-known wrapper keys first, then everything else.
     keys.sort(function (a, b) { return pri(a) - pri(b); });
     for (var i = 0; i < keys.length; i++) {
-      var r = extractState(x[keys[i]], depth + 1); if (r) return r;
+      var r = extractPayload(x[keys[i]], depth + 1); if (r) return r;
     }
     return null;
   }
-  function pri(k) { return /^(STATE_JSON|state|value|data|NOW_PLAYING|payload)$/i.test(k) ? 0 : 1; }
+  function extractState(x) { var p = extractPayload(x, 0); return p && p.state || null; }
+  function pri(k) { return /^(STATE_JSON|state|value|NOW_PLAYING|NOW_PLAYING_ARTWORK|payload|data)$/i.test(k) ? 0 : 1; }
 
   var c4 = { active: false, wd: null, miss: 0, seen: false };
   function c4Receive(x) {
-    var st = extractState(x, 0);
-    if (!st) return;
+    var p = extractPayload(x, 0);
+    if (!p) return;
+    if (p.art) return artReply(p.art);
+    var st = p.state;
     c4.seen = true; c4.miss = 0; clearTimeout(c4.wd); c4.wd = null;
     setConn(false);
     ingest(st, 'c4');
@@ -1250,8 +1317,10 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
     }, wait);
   }
   // Global callbacks required by the Navigator JS API. Defined unconditionally (harmless otherwise).
-  W.onDataToUi = function (x) { c4Receive(x); };
-  W.onVariable = function (x) { c4Receive(x); };
+  // __npLast keeps the raw payloads for hardware checks from the web view's JS console.
+  var npLast = W.__npLast = { dataToUi: null, variable: null };
+  W.onDataToUi = function (x) { npLast.dataToUi = x; c4Receive(x); };
+  W.onVariable = function (x) { npLast.variable = x; c4Receive(x); };
   W.onSendCommandError = function (msg) {
     if (W.console) console.warn('C4 sendCommand error', msg);
     if (c4.active) { setConn(true); }

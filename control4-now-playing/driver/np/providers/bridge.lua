@@ -15,6 +15,24 @@ local playback_mod = require("np.playback")
 
 local M = {}
 
+-- Credentials never belong in a published URL (STATE_JSON, ARTWORK_URL, logs): drop
+-- token/access_token/api_key query parameters (older bridges put ?token= on artwork URLs;
+-- current ones serve versioned artwork without it, and the driver sends the token as a
+-- header when it fetches bridge artwork for the page).
+local SECRET_PARAMS = { token = true, access_token = true, api_key = true, apikey = true }
+function M.strip_secrets(url)
+  if type(url) ~= "string" then return url end
+  local base, query, frag = url:match("^([^?#]*)%?([^#]*)(.*)$")
+  if not base then return url end
+  local keep = {}
+  for part in query:gmatch("[^&]+") do
+    local k = (part:match("^([^=]*)") or ""):lower()
+    if not SECRET_PARAMS[k] then keep[#keep + 1] = part end
+  end
+  if #keep == 0 then return base .. frag end
+  return base .. "?" .. table.concat(keep, "&") .. frag
+end
+
 local Bridge = {}
 Bridge.__index = Bridge
 
@@ -43,6 +61,8 @@ function Bridge:poll(cb)
       device_name = self.config.name,
     })
     if self.config.name then pb.source.device_name = self.config.name end
+    pb.media.artwork_url = M.strip_secrets(pb.media.artwork_url)
+    pb.source.app_icon_url = M.strip_secrets(pb.source.app_icon_url)
     cb(nil, pb)
   end)
 end

@@ -16,7 +16,7 @@ package.path = root .. "/driver/?.lua;" .. root .. "/tests/?.lua;" .. root .. "/
 
 local SPECS = {
   "json_spec", "util_spec", "playback_spec", "net_spec", "roku_spec", "homeassistant_spec",
-  "bridge_static_spec", "multi_spec", "tmdb_spec", "omdb_spec", "gracenote_spec", "music_spec",
+  "bridge_static_spec", "bridge_contract_spec", "multi_spec", "tmdb_spec", "omdb_spec", "gracenote_spec", "music_spec",
   "pipeline_spec", "schema_spec", "flatten_spec", "engine_spec",
   -- Control4 glue (tests/c4/): pure modules, then the real driver.lua against the C4 mock
   "c4/static_spec", "c4/config_spec", "c4/events_spec", "c4/room_spec", "c4/artwork_spec",

@@ -4,7 +4,7 @@ c4.variables -- the driver's Control4 variables.
 !!! APPEND-ONLY !!!
 Composer programming binds to variable IDs, and Control4 assigns IDs in the order the
 driver calls C4:AddVariable. NEVER reorder, rename or remove an entry of LIST; only append
-new ones at the end. tests/c4/variables_spec.lua asserts that np.flatten.definitions()
+new ones at the end. tests/c4/static_spec.lua asserts that np.flatten.definitions()
 still matches the head of this list, so a core change cannot silently reorder IDs.
 
   Vars.LIST                         ordered { name, type }

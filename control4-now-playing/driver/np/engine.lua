@@ -11,12 +11,9 @@ deps = {
   set_timer = fn(seconds, fn) -> handle with :cancel(),
   log   = fn(level, msg),                         -- "debug"|"info"|"warn"|"error"
   store = { get = fn(key), set = fn(key, value) },-- optional (enrichment cache persistence)
-  artwork = fn(url, kind) -> url,                 -- optional: rewrite media.artwork_url (kind "artwork")
-                                                  -- and source.app_icon_url (kind "app_icon") before
-                                                  -- publishing, e.g. to proxy LAN-only images through
-                                                  -- the controller. Identity when absent. Must be
-                                                  -- deterministic (same in -> same out).
 }
+Image URLs are published exactly as the providers / enrichers report them (the state stays
+small); a UI that cannot reach a LAN-only image asks the glue to fetch it (c4/artwork.lua).
 
 config (the glue builds this from driver properties):
 {
@@ -53,7 +50,6 @@ API
   engine:set_config(config)           -- live property changes
   engine:push(provider_id, playback)  -- feed a static provider (C4 room) and refresh
   engine:get_provider(id)
-  engine:set_artwork_rewriter(fn)     -- same as deps.artwork
   engine:flatten(now)                 -> np.flatten list for C4 variables
   engine:get_status()                 -> diagnostics table
   Engine.media_key(playback), Engine.flatten(state, now)
@@ -69,6 +65,7 @@ local flatten = require("np.flatten")
 
 local M = {}
 M.SCHEMA_VERSION = 1
+M.POLL_WATCHDOG_S = 30 -- a poll whose callback never comes is abandoned after this long
 M.flatten = flatten.flatten
 
 local Engine = {}
@@ -109,7 +106,6 @@ function M.new(config, deps)
   self.enrich_seq = 0
   self.state = initial_state(self.config, deps.now())
   self.json_cache = nil
-  self.artwork_fn = deps.artwork
   self:_build_providers()
   self:_build_pipeline()
   return self
@@ -192,26 +188,9 @@ function Engine:flatten(now)
   return flatten.flatten(self.state, now or self.deps.now())
 end
 
-function Engine:set_artwork_rewriter(fn)
-  self.artwork_fn = fn
-end
-
 ---------------------------------------------------------------------------
 -- state transitions
 ---------------------------------------------------------------------------
-
-function Engine:_rewrite_artwork(pb)
-  local fn = self.artwork_fn
-  if not fn then return end
-  local function rw(u, kind)
-    if not u then return nil end
-    local ok, res = pcall(fn, u, kind)
-    if ok and type(res) == "string" and res ~= "" then return res end
-    return u
-  end
-  pb.media.artwork_url = rw(pb.media.artwork_url, "artwork")
-  pb.source.app_icon_url = rw(pb.source.app_icon_url, "app_icon")
-end
 
 local function differs(a, b, tol)
   if a == nil and b == nil then return false end
@@ -241,7 +220,6 @@ function Engine:_playback_changes(prev, new)
 end
 
 function Engine:_apply(pb)
-  self:_rewrite_artwork(pb)
   self.last_pb = util.deep_copy(pb)
   local st = self.state
   local key = M.media_key(pb)
@@ -317,7 +295,7 @@ end
 
 function Engine:_poll_now()
   local now = self.deps.now()
-  if self.polling and self.poll_started and now - self.poll_started < 30 then
+  if self.polling and self.poll_started and now - self.poll_started < M.POLL_WATCHDOG_S then
     self.refresh_pending = true
     return
   end
@@ -348,6 +326,12 @@ function Engine:_poll_now()
       end
     end
   end)
+  -- Watchdog: if this poll's callback is lost (a provider that never answers), poll again
+  -- after POLL_WATCHDOG_S (the superseded callback is ignored; multi skips the busy provider).
+  -- A normal completion re-schedules and so cancels it.
+  if self.polling and seq == self.poll_seq and self.running then
+    self:_schedule(M.POLL_WATCHDOG_S)
+  end
 end
 
 function Engine:start()

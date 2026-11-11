@@ -1,21 +1,26 @@
 --[[
-c4.artwork -- embed LAN-only artwork as data: URIs.
+c4.artwork -- on-demand artwork fetcher for the web view (GET_ARTWORK).
 
-A remote Navigator (phone on LTE) cannot load http://192.168.x.x/... images. With "Embed LAN
-Artwork" on, artwork/app-icon URLs whose host is private (10/8, 172.16/12, 192.168/16,
-127/8, 169.254/16, *.local, localhost, IPv6 ULA/link-local) are downloaded on the controller
-and substituted with data:<mime>;base64,... through engine:set_artwork_rewriter(fn).
+A remote Navigator (phone on LTE) cannot load http://192.168.x.x/... images. The state
+document always keeps the ORIGINAL image URLs (small STATE_JSON / DataToUI payloads); the
+PAGE decides it needs help -- the URL's host is private-LAN / relative (is_lan, the same rule
+as the page's isLan()) or an <img> failed to load -- and asks the driver:
 
-The rewriter is synchronous and deterministic: it returns the original URL until the
-download has finished (then the cached data URI); on completion `on_ready()` is called
-(the glue calls engine:refresh()). Failures are remembered for retry_s (no hammering).
-The Control4 variables must keep the original URL: restore(state) maps data URIs back.
+  page:   C4.sendCommand("GET_ARTWORK", JSON.stringify({url: u}), true, false)
+  driver: ExecuteCommand("GET_ARTWORK") -> c4.app checks that `u` is an image URL of the
+          CURRENT state (no open proxy) -> A:fetch(u, cb) -> downloads (size cap, LRU cache,
+          failure back-off, one request per URL however many pages ask) ->
+          C4:SendDataToUI("NOW_PLAYING_ARTWORK", { url = u, data = "data:image/...;base64,..." })
+          or                                     { url = u, error = "..." }
+With "Embed LAN Artwork" Off, GET_ARTWORK is answered with an error (page shows its
+generated artwork).
 
-  local A = Artwork.new(deps, { max_bytes = 262144, max_entries = 12, on_ready = fn })
-  A.rewrite(url, kind) -> url | data uri          (bound function, pass to the engine)
-  A:restore(state) -> state (in place)            data URIs -> original URLs ("" if unknown)
-  A:clear()
-  Artwork.is_lan(url) -> bool ; Artwork.sniff(body) -> mime | nil
+  local A = Artwork.new(deps, { max_bytes = 262144, max_entries = 12, retry_s = 300 })
+  A:fetch(url, cb)          cb(err|nil, data_uri|nil) exactly once; cached hits answer synchronously
+  A:set_auth({ { prefix = "http://bridge:8765/", headers = { Authorization = "Bearer ..." } } })
+                            extra request headers for URLs under a prefix (Apple TV bridge token)
+  A:set_enabled(bool) ; A:count() ; A:clear()
+  Artwork.is_lan(url) -> bool ; Artwork.sniff(body) -> mime | nil ; Artwork.host_of(url)
 ]]
 
 local M = {}
@@ -84,49 +89,78 @@ function M.new(deps, opts)
     max_entries = opts.max_entries or 12,
     retry_s = opts.retry_s or 300,
     timeout = opts.timeout or 8,
-    on_ready = opts.on_ready,
     enabled = opts.enabled ~= false,
+    auth = {},       -- { { prefix = "http://host:port/", headers = {...} }, ... }
     cache = {},      -- url -> { data = uri, used = n }
-    by_data = {},    -- data uri -> url
-    failed = {},     -- url -> retry_at
-    inflight = {},   -- url -> true
+    failed = {},     -- url -> { at = retry_at, err = "..." }
+    waiters = {},    -- url -> { cb, ... } while a download is in flight
+    gen = 0,
     tick = 0,
     stats = { ok = 0, failed = 0 },
   }, A)
-  self.rewrite = function(url, kind) return self:_rewrite(url, kind) end
   return self
 end
 
 function A:set_enabled(on) self.enabled = on and true or false end
 
-function A:_rewrite(url, kind)
-  if not self.enabled or type(url) ~= "string" then return url end
+function A:set_auth(list) self.auth = list or {} end
+
+function A:_headers(url)
+  local h = { Accept = "image/*" }
+  for _, a in ipairs(self.auth) do
+    if type(a.prefix) == "string" and a.prefix ~= "" and url:sub(1, #a.prefix) == a.prefix then
+      for k, v in pairs(a.headers or {}) do h[k] = v end
+    end
+  end
+  return h
+end
+
+local function call(cb, err, data)
+  local ok, e = pcall(cb, err, data)
+  return ok, e
+end
+
+-- cb(err, data_uri): exactly once. Cached results (and remembered failures) answer at once.
+function A:fetch(url, cb)
+  if not self.enabled then return call(cb, "disabled") end
+  if type(url) ~= "string" or not url:find("^https?://[^/]") then return call(cb, "not an http(s) URL") end
   local e = self.cache[url]
   if e then
     self.tick = self.tick + 1
     e.used = self.tick
-    return e.data
+    return call(cb, nil, e.data)
   end
-  if not M.is_lan(url) or not url:find("^https?://") then return url end
-  local retry_at = self.failed[url]
-  if retry_at and self.deps.now() < retry_at then return url end
-  if not self.inflight[url] then self:_fetch(url) end
-  return url
+  local f = self.failed[url]
+  if f and self.deps.now() < f.at then return call(cb, f.err) end
+  if self.waiters[url] then
+    table.insert(self.waiters[url], cb)
+    return
+  end
+  self.waiters[url] = { cb }
+  self:_download(url)
+end
+
+function A:_finish(url, err, data)
+  local list = self.waiters[url] or {}
+  self.waiters[url] = nil
+  for _, cb in ipairs(list) do
+    local ok, e = call(cb, err, data)
+    if not ok then self.deps.log("error", "artwork callback failed: " .. tostring(e)) end
+  end
 end
 
 function A:_fail(url, why)
-  self.inflight[url] = nil
-  self.failed[url] = self.deps.now() + self.retry_s
+  self.failed[url] = { at = self.deps.now() + self.retry_s, err = why }
   self.stats.failed = self.stats.failed + 1
-  self.deps.log("info", "LAN artwork not embedded (" .. why .. "): " .. url)
+  self.deps.log("info", "artwork not fetched (" .. why .. "): " .. url)
+  self:_finish(url, why)
 end
 
-function A:_fetch(url)
-  self.inflight[url] = true
+function A:_download(url)
   local gen = self.gen
-  self.deps.http.request({ method = "GET", url = url, timeout = self.timeout, headers = { Accept = "image/*" } },
+  self.deps.http.request({ method = "GET", url = url, timeout = self.timeout, headers = self:_headers(url) },
     function(err, resp)
-      if gen ~= self.gen then return end -- cleared meanwhile
+      if gen ~= self.gen then return end -- cleared meanwhile (waiters were dropped with it)
       if err then return self:_fail(url, tostring(err)) end
       local status = tonumber(resp.status) or 0
       if status < 200 or status >= 300 then return self:_fail(url, "HTTP " .. status) end
@@ -149,28 +183,23 @@ function A:_fetch(url)
       if not mime or not mime:lower():find("^image/") then mime = sniffed end
       if not mime then return self:_fail(url, "not an image") end
       local data = "data:" .. mime:lower() .. ";base64," .. self.deps.base64(body)
-      self.inflight[url] = nil
       self.failed[url] = nil
       self:_store(url, data)
       self.stats.ok = self.stats.ok + 1
-      self.deps.log("debug", "LAN artwork embedded (" .. #body .. " bytes): " .. url)
-      if self.on_ready then self.on_ready(url) end
+      self.deps.log("debug", "artwork fetched (" .. #body .. " bytes): " .. url)
+      self:_finish(url, nil, data)
     end)
 end
 
 function A:_store(url, data)
   self.tick = self.tick + 1
   self.cache[url] = { data = data, used = self.tick }
-  self.by_data[data] = url
   local n, oldest, oldest_k = 0, nil, nil
   for k, e in pairs(self.cache) do
     n = n + 1
     if not oldest or e.used < oldest then oldest, oldest_k = e.used, k end
   end
-  if n > self.max_entries and oldest_k then
-    self.by_data[self.cache[oldest_k].data] = nil
-    self.cache[oldest_k] = nil
-  end
+  if n > self.max_entries and oldest_k then self.cache[oldest_k] = nil end
 end
 
 function A:count()
@@ -179,22 +208,14 @@ function A:count()
   return n
 end
 
-local function back(self, u)
-  if type(u) == "string" and u:find("^data:") then return self.by_data[u] or nil end
-  return u
-end
-
--- Replace data URIs in a state copy by their original URLs (never leaks a data URI).
-function A:restore(state)
-  if type(state) ~= "table" then return state end
-  if state.media then state.media.artwork_url = back(self, state.media.artwork_url) end
-  if state.source then state.source.app_icon_url = back(self, state.source.app_icon_url) end
-  return state
-end
-
+-- Drops the cache; downloads in flight are answered "cancelled" (callbacks stay exactly-once).
 function A:clear()
-  self.gen = (self.gen or 0) + 1
-  self.cache, self.by_data, self.failed, self.inflight = {}, {}, {}, {}
+  self.gen = self.gen + 1
+  local pending = self.waiters
+  self.cache, self.failed, self.waiters = {}, {}, {}
+  for url, list in pairs(pending) do
+    for _, cb in ipairs(list) do call(cb, "cancelled") end
+  end
 end
 
 return M

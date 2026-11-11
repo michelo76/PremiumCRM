@@ -9,13 +9,18 @@ so a Lua error never kills the driver.
                "execute_command" | "ui_request" | "received_from_proxy" |
                "on_watched_variable_changed" | "on_server_data_in" | "on_server_status", ...)
 
+Web view protocol (see README "Page <-> driver protocol"):
+  ExecuteCommand GET_STATE            -> SendDataToUI("NOW_PLAYING", { state = json })
+  ExecuteCommand GET_ARTWORK {url=u}  -> SendDataToUI("NOW_PLAYING_ARTWORK", { url = u, data = uri })
+                                         or { url = u, error = "..." }; u must be an image URL
+                                         of the current state (c4.artwork)
+
 Lifecycle: OnDriverInit adds the variables (nothing else is allowed there); everything else
 starts in OnDriverLateInit and is torn down in OnDriverDestroyed.
 ]]
 
 local Engine = require("np.engine")
 local flatten = require("np.flatten")
-local util = require("np.util")
 local Version = require("c4.version")
 local Vars = require("c4.variables")
 local Deps = require("c4.deps")
@@ -26,6 +31,7 @@ local Artwork = require("c4.artwork")
 local Server = require("c4.httpserver")
 local Status = require("c4.status")
 local Diag = require("c4.diagnostics")
+local json = require("np.json")
 
 local M = {}
 
@@ -36,6 +42,7 @@ M.POSITION_S = 5
 M.STATUS_S = 15
 M.RECONFIG_DEBOUNCE_S = 0.5
 M.CACHE_PERSIST_KEY = "np_enrich_cache_v1"
+M.ARTWORK_CMD = "NOW_PLAYING_ARTWORK"
 
 M.READ_ONLY = {
   ["Driver Version"] = true, ["Status"] = true, ["Active Source"] = true, ["Metadata Sources"] = true,
@@ -48,6 +55,49 @@ function M.with_sent_at(json, now)
   local n = string.format("%d", math.floor(tonumber(now) or 0))
   if json == "{}" then return '{"sent_at":' .. n .. "}" end
   return '{"sent_at":' .. n .. "," .. json:sub(2)
+end
+
+-- The URL a GET_ARTWORK request asks for. The Navigator's exact tParams shape for
+-- C4.sendCommand(name, "<json>", ...) is unverified, so accept: a table with `url`, a JSON
+-- string, or a table holding such a JSON string under any key.
+function M.artwork_request_url(params, depth)
+  depth = depth or 0
+  if depth > 3 then return nil end
+  if type(params) == "string" then
+    local s = params:gsub("^%s+", ""):gsub("%s+$", "")
+    if s:find("^https?://") then return s end
+    if s:sub(1, 1) == "{" then
+      local ok, v = pcall(json.decode, s)
+      if ok and type(v) == "table" then return M.artwork_request_url(v, depth + 1) end
+    end
+    return nil
+  end
+  if type(params) ~= "table" then return nil end
+  for _, k in ipairs({ "url", "URL", "Url" }) do
+    if type(params[k]) == "string" and params[k]:find("^https?://") then return params[k] end
+  end
+  for _, v in pairs(params) do
+    local u = M.artwork_request_url(v, depth + 1)
+    if u then return u end
+  end
+  return nil
+end
+
+-- Image URLs the page may ask the driver to fetch: those of the current state only (cast
+-- photos excluded -- the page never asks for them). Anything else is refused (no open proxy).
+function M.state_image_urls(state)
+  local set = {}
+  local function add(u) if type(u) == "string" and u:find("^https?://") then set[u] = true end end
+  state = state or {}
+  add((state.media or {}).artwork_url)
+  add((state.source or {}).app_icon_url)
+  local d = state.details
+  if type(d) == "table" then
+    add(d.poster_url); add(d.backdrop_url); add(d.logo_url)
+    if type(d.music) == "table" then add(d.music.artist_image_url) end
+    if type(d.episode) == "table" then add(d.episode.still_url) end
+  end
+  return set
 end
 
 function M.xml_escape(s)
@@ -136,7 +186,7 @@ function App:on_late_init(dit)
   })
   local deps = self.deps
   self.room = Room.new(C4, deps, function(_, var) self:_room_changed(var) end)
-  self.artwork = Artwork.new(deps, { on_ready = function() if self.engine then self.engine:refresh() end end })
+  self.artwork = Artwork.new(deps)
   self.server = Server.new(C4, deps, {
     state = function() return self:_state_for_ui() end,
     index = function() return self:_index_html() end,
@@ -207,13 +257,13 @@ function App:_configure(reason)
     local prev_room = self.cfg and self.cfg.room and self.cfg.room.id
     self.cfg, self.info = cfg, info
     self.artwork:set_enabled(info.embed_artwork)
+    self.artwork:set_auth(info.artwork_auth)
     if not self.engine then
       self.engine = Engine.new(cfg, deps)
       self.unsubscribe = self.engine:on_change(function(state, changes) self:_on_change(state, changes) end)
     else
       self.engine:set_config(cfg)
     end
-    self.engine:set_artwork_rewriter(info.embed_artwork and self.artwork.rewrite or nil)
     if info.configured then
       if info.room_media or info.gated then self:_push_room() end
       if not self.engine.running then self.engine:start() end
@@ -268,9 +318,7 @@ end
 ---------------------------------------------------------------------------
 
 function App:_flat(state)
-  local copy = util.deep_copy(state)
-  self.artwork:restore(copy)
-  return flatten.flatten(copy, self.deps.now())
+  return flatten.flatten(state, self.deps.now())
 end
 
 function App:_state_for_ui()
@@ -307,6 +355,13 @@ function App:_publish(state, initial, changes)
   if not initial then
     local events
     events, self.ev_snap = Events.derive(self.ev_snap, state, changes)
+    if not self.ev_baseline then
+      -- The first real state after (re)start is only the baseline: a controller reboot or driver
+      -- update while a movie plays must not fire Source/App/Media Changed, Playback/Movie Started.
+      self.ev_baseline = true
+      if #events > 0 then self.deps.log("debug", "events baseline (not fired): " .. table.concat(events, ", ")) end
+      events = {}
+    end
     for _, name in ipairs(events) do
       self.deps.log("info", "event: " .. name)
       pcall(C4.FireEvent, C4, name)
@@ -395,10 +450,13 @@ local ACTIONS = {
 }
 
 function App:execute_command(cmd, params)
+  local raw = params
   params = type(params) == "table" and params or {}
   if not self.engine then return end
   if cmd == "GET_STATE" then
     return self:_push_ui()
+  elseif cmd == "GET_ARTWORK" then
+    return self:_get_artwork(raw)
   elseif cmd == "LUA_ACTION" then
     local m = ACTIONS[tostring(params.ACTION)]
     if m then return self[m](self) end
@@ -408,6 +466,27 @@ function App:execute_command(cmd, params)
   else
     self.deps.log("debug", "ExecuteCommand ignored: " .. tostring(cmd))
   end
+end
+
+function App:_artwork_reply(t)
+  if self.destroyed or not self.C4.SendDataToUI then return end
+  pcall(self.C4.SendDataToUI, self.C4, M.ARTWORK_CMD, t)
+end
+
+function App:_get_artwork(params)
+  local url = M.artwork_request_url(params)
+  if not url then
+    self.deps.log("debug", "GET_ARTWORK without a usable url")
+    return
+  end
+  if not M.state_image_urls(self.engine.state)[url] then
+    self.deps.log("info", "GET_ARTWORK refused (not an image of the current state): " .. url)
+    return self:_artwork_reply({ url = url, error = "not in current state" })
+  end
+  self.artwork:fetch(url, function(err, data)
+    if err then return self:_artwork_reply({ url = url, error = tostring(err) }) end
+    self:_artwork_reply({ url = url, data = data })
+  end)
 end
 
 function App:ui_request(cmd, params)
