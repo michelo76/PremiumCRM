@@ -1,0 +1,8 @@
+[
+ {"startTime":"2026-09-21T13:00Z","endTime":"2026-09-21T14:00Z","duration":60,"stationId":"10021","qualifiers":["CC"],"ratings":[{"body":"USA Parental Rating","code":"TV-PG"}],
+  "program":{"tmsId":"SH000001","rootId":"1","seriesId":"1","title":"General Hospital","shortDescription":"Soap.","entityType":"Show","subType":"Series","genres":["Soap"]}},
+ {"startTime":"2026-09-21T14:00Z","endTime":"2026-09-21T14:30Z","duration":30,"stationId":"10021","qualifiers":["CC","HD","New"],
+  "program":{"tmsId":"EP000046230123","rootId":"25789123","seriesId":"184610","subType":"Series","entityType":"Episode","title":"ABC World News Tonight With David Muir","episodeTitle":"September 21, 2026","releaseYear":1978,"genres":["News"],"origAirDate":"2026-09-21","shortDescription":"The day's top stories.","longDescription":"David Muir anchors the day's top national and international stories.","topCast":["David Muir"],"ratings":[{"body":"USA Parental Rating","code":"TV-G"}],"preferredImage":{"uri":"assets/p184610_b_h3_aa.jpg","width":"720","height":"540"}}},
+ {"startTime":"2026-09-21T14:30Z","endTime":"2026-09-21T15:00Z","duration":30,"stationId":"10021",
+  "program":{"tmsId":"EP000000","rootId":"2","title":"Jeopardy!","episodeTitle":"Tournament of Champions","genres":["Game show"]}}
+]

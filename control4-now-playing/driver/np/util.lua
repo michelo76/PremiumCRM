@@ -241,10 +241,13 @@ function M.extract_year(s)
   local y = s:match("[%(%[]((1[89]%d%d))[%)%]]") or s:match("[%(%[]((20%d%d))[%)%]]")
   if y then return tonumber(y) end
   if is_filename_like(s) or s:lower():find("1080p") or s:lower():find("2160p") or s:lower():find("720p") then
+    -- the LAST year-like token (release names put the year after the title: Blade.Runner.2049.2017)
     local last
-    for yy in s:gmatch("%f[%d]((19%d%d))%f[%D]") do last = yy end
-    for yy in s:gmatch("%f[%d]((20%d%d))%f[%D]") do last = last and math.max(tonumber(last), tonumber(yy)) or yy end
-    if last then return tonumber(last) end
+    for yy in s:gmatch("%f[%d]([12][089]%d%d)%f[%D]") do
+      local n = tonumber(yy)
+      if n >= 1880 and n <= 2100 then last = n end
+    end
+    if last then return last end
   end
   return nil
 end

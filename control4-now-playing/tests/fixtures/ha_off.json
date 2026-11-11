@@ -1,0 +1,11 @@
+{
+  "entity_id": "media_player.living_room_apple_tv",
+  "state": "off",
+  "attributes": {
+    "device_class": "tv",
+    "friendly_name": "Living Room Apple TV",
+    "supported_features": 317375
+  },
+  "last_changed": "2026-09-21T10:00:00+00:00",
+  "last_updated": "2026-09-21T10:00:00+00:00"
+}

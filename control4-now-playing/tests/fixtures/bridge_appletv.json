@@ -1,0 +1,8 @@
+{
+  "source": {"provider": "appletv", "device_name": "Den Apple TV", "app_name": "TV", "app_id": "com.apple.TVWatchList", "app_icon_url": null},
+  "playback": {"state": "playing", "position_s": 3021.4, "duration_s": 7860, "position_updated_at": 1790000000.5, "is_live": false, "volume": 30},
+  "media": {"kind": "movie", "title": "Top Gun: Maverick", "subtitle": null, "series_title": null, "season": null, "episode": null,
+            "episode_title": null, "artist": null, "album": null, "album_artist": null, "track_number": null,
+            "channel_name": null, "channel_number": null, "year": 2022, "genres": ["Action", "Drama"],
+            "artwork_url": "https://is1-ssl.mzstatic.com/image/thumb/Video/abc/600x600bb.jpg"}
+}

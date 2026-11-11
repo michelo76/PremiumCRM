@@ -165,6 +165,45 @@ function indexPage() {
     '<style>a{color:#f0b54a}</style>';
 }
 
+/*
+ * Fake Control4 Navigator JS API, injected into index.html when the page URL has ?c4mock=1.
+ * Mimics the driver side of the protocol: GET_STATE -> push full state; push again on every version change.
+ * Rotates through several payload wrapper shapes to exercise the page's extractState().
+ * ?c4drop=N  ignores the first N GET_STATE commands (tests the no-response -> retry path).
+ * /_mock/fail?on=1 makes the fake driver go silent (no pushes, no replies).
+ * window.__c4log records calls for tests.
+ */
+const C4_MOCK = '(' + function () {
+  var q = {};
+  location.search.replace(/^\?/, '').split('&').forEach(function (p) { var i = p.indexOf('='); if (i > 0) q[p.slice(0, i)] = decodeURIComponent(p.slice(i + 1)); });
+  var drop = +(q.c4drop || 0), shape = 0, lastV = null, timer = null;
+  var log = window.__c4log = [];
+  function api() { return '/api/state' + (q.fixture ? '?fixture=' + encodeURIComponent(q.fixture) : ''); }
+  function fetchState(cb) {
+    fetch(api(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(cb, function () { cb(null); });
+  }
+  function deliver(st) {
+    var json = JSON.stringify(st), s = shape++ % 5;
+    log.push('push:' + s + ':' + st.version);
+    if (s === 0) window.onVariable(JSON.stringify({ name: 'STATE_JSON', value: json }));
+    else if (s === 1) window.onDataToUi(JSON.stringify({ STATE_JSON: json }));
+    else if (s === 2) window.onDataToUi({ NOW_PLAYING: { state: json } });
+    else if (s === 3) window.onDataToUi(json);
+    else window.onVariable({ state: st });
+  }
+  function watch() { if (lastV === null) return; fetchState(function (st) { if (st && st.version !== lastV) { lastV = st.version; deliver(st); } }); }
+  window.C4 = {
+    subscribeToDataToUi: function (b) { log.push('subscribeToDataToUi:' + b); if (!timer) timer = setInterval(watch, 1000); },
+    subscribeToVariable: function (n, b) { log.push('subscribeToVariable:' + n + ':' + b); },
+    sendCommand: function (name, params, async, proto) {
+      log.push('sendCommand:' + name + ':' + params + ':' + async + ':' + proto);
+      if (name !== 'GET_STATE') return;
+      if (drop > 0) { drop--; log.push('dropped'); return; }
+      fetchState(function (st) { if (st) { lastV = st.version; deliver(st); } });
+    },
+  };
+}.toString() + ')();';
+
 const server = http.createServer((req, res) => {
   const u = url.parse(req.url, true);
   const p = decodeURIComponent(u.pathname || '/');
@@ -210,7 +249,14 @@ const server = http.createServer((req, res) => {
   if (file.indexOf(WWW) !== 0) return send(res, 403, 'forbidden');
   fs.stat(file, (err, s) => {
     if (err || !s.isFile()) return send(res, 404, 'not found');
-    send(res, 200, fs.readFileSync(file), { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+    let body = fs.readFileSync(file);
+    if (rel === '/index.html' && u.query.c4mock === '1') {
+      // Inject the fake Navigator API before the app script (mock server only; never shipped).
+      const html = body.toString('utf8');
+      const i = html.indexOf('<script>');
+      body = html.slice(0, i) + '<script>' + C4_MOCK + '</script>\n' + html.slice(i);
+    }
+    send(res, 200, body, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
   });
 });
 

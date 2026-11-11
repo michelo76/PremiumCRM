@@ -1,0 +1,9 @@
+{"created":"2026-09-21T14:13:20.000Z","count":2,"offset":0,"recordings":[
+ {"id":"5e6e2b4d-5b0b-4d5e-9b3d-2a5b0b3f1c11","score":100,"title":"Blinding Lights","length":200040,"video":null,
+  "artist-credit":[{"name":"The Weeknd","artist":{"id":"c8b03190-306c-4120-bb0b-6f2ebfc06ea9","name":"The Weeknd","sort-name":"Weeknd, The"}}],
+  "first-release-date":"2019-11-29",
+  "releases":[
+   {"id":"aa11aa11-0000-4000-8000-000000000001","status-id":"4e304316","count":1,"title":"Blinding Lights","status":"Official","date":"2019-11-29","release-group":{"id":"rg1","type-id":"x","primary-type":"Single","title":"Blinding Lights"}},
+   {"id":"bb22bb22-0000-4000-8000-000000000002","count":1,"title":"After Hours","status":"Official","date":"2020-03-20","release-group":{"id":"rg2","primary-type":"Album","title":"After Hours"}}]},
+ {"id":"99999999-0000-4000-8000-000000000009","score":64,"title":"Blinding Lights (cover)","artist-credit":[{"name":"Somebody Else"}],"releases":[]}
+]}

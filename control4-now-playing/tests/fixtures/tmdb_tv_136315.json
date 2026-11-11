@@ -1,0 +1,18 @@
+{"adult":false,"backdrop_path":"/zPyMs2zOVFDFUwF9cBJu63w1eLY.jpg",
+"created_by":[{"id":1214171,"name":"Christopher Storer","profile_path":"/x.jpg"}],
+"episode_run_time":[30],"first_air_date":"2022-06-23","last_air_date":"2025-06-25",
+"genres":[{"id":18,"name":"Drama"},{"id":35,"name":"Comedy"}],"id":136315,"in_production":true,"languages":["en"],
+"name":"The Bear","networks":[{"id":453,"name":"Hulu","logo_path":"/pqUTCleNUiTLAVlelGxUgWn1ELh.png","origin_country":"US"},{"id":88,"name":"FX","origin_country":"US"}],
+"next_episode_to_air":{"id":5555555,"name":"TBA","air_date":"2026-06-24","episode_number":1,"season_number":5,"runtime":null,"overview":""},
+"number_of_episodes":38,"number_of_seasons":4,"original_language":"en","original_name":"The Bear",
+"overview":"Carmy, a young fine-dining chef, comes home to Chicago to run his late brother’s Italian beef sandwich shop. As he fights to transform the shop and himself, he works alongside a rough-around-the-edges kitchen staff that ultimately reveal themselves as his chosen family.",
+"popularity":231.4,"poster_path":"/sHFlbKS3WLqMnp9t2ghADIJFnuQ.jpg",
+"production_companies":[{"id":9999,"name":"FXP"}],"status":"Returning Series","tagline":"","type":"Scripted","vote_average":8.2,"vote_count":1450,
+"credits":{"cast":[
+ {"id":1,"name":"Jeremy Allen White","character":"Carmen 'Carmy' Berzatto","order":0,"profile_path":"/jaw.jpg"},
+ {"id":2,"name":"Ebon Moss-Bachrach","character":"Richard 'Richie' Jerimovich","order":1,"profile_path":"/emb.jpg"},
+ {"id":3,"name":"Ayo Edebiri","character":"Sydney Adamu","order":2,"profile_path":"/ae.jpg"}],"crew":[]},
+"content_ratings":{"results":[{"descriptors":[],"iso_3166_1":"DE","rating":"16"},{"descriptors":[],"iso_3166_1":"US","rating":"TV-MA"}]},
+"external_ids":{"imdb_id":"tt14452776","tvdb_id":405627,"wikidata_id":"Q113286000"},
+"videos":{"results":[{"key":"y-cqqAJIXhs","site":"YouTube","type":"Trailer","official":true,"name":"Season 1 Trailer"}]},
+"images":{"logos":[{"file_path":"/bearLogo.png","iso_639_1":"en","vote_average":5.3}]}}
