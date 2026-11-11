@@ -1,0 +1,194 @@
+{
+  "schema": 1,
+  "version": 7,
+  "updated_at": 1790000000,
+  "media_key": "appletv|max|dune part two|local",
+  "room": {
+    "id": 12,
+    "name": "Family Room"
+  },
+  "source": {
+    "provider": "appletv",
+    "device_name": "Family Room Apple TV",
+    "app_name": "Max",
+    "app_id": "com.wbd.stream",
+    "app_icon_url": null
+  },
+  "playback": {
+    "state": "playing",
+    "position_s": 4823.4,
+    "duration_s": 9960,
+    "position_updated_at": 1790000000,
+    "is_live": false,
+    "volume": 38
+  },
+  "media": {
+    "kind": "movie",
+    "title": "Dune: Part Two",
+    "subtitle": null,
+    "series_title": null,
+    "season": null,
+    "episode": null,
+    "episode_title": null,
+    "artist": null,
+    "album": null,
+    "album_artist": null,
+    "track_number": null,
+    "channel_name": null,
+    "channel_number": null,
+    "year": 2024,
+    "genres": [
+      "Science Fiction",
+      "Adventure"
+    ],
+    "artwork_url": "/_mock/img/500x750/dune2.svg?label=DUNE"
+  },
+  "details": {
+    "matched": true,
+    "confidence": 0.97,
+    "tagline": "Long live the fighters.",
+    "overview": "Follow the mythic journey of Paul Atreides as he unites with Chani and the Fremen while on a path of revenge against the conspirators who destroyed his family. Facing a choice between the love of his life and the fate of the known universe, Paul endeavors to prevent a terrible future only he can foresee.",
+    "release_date": "2024-03-01",
+    "year": 2024,
+    "runtime_min": 166,
+    "content_rating": "PG-13",
+    "genres": [
+      "Science Fiction",
+      "Adventure",
+      "Drama"
+    ],
+    "status": "Released",
+    "poster_url": "/_mock/img/500x750/dune2.svg?label=DUNE",
+    "backdrop_url": "/_mock/img/1280x720/dune2-bd.svg",
+    "logo_url": null,
+    "ratings": {
+      "imdb": {
+        "score": 8.5,
+        "votes": 612000
+      },
+      "rotten_tomatoes": 92,
+      "metacritic": 79,
+      "tmdb": 8.1
+    },
+    "cast": [
+      {
+        "name": "Timothée Chalamet",
+        "character": "Paul Atreides",
+        "photo_url": "/_mock/img/185x185/cast0.svg"
+      },
+      {
+        "name": "Zendaya",
+        "character": "Chani",
+        "photo_url": "/_mock/img/185x185/cast1.svg"
+      },
+      {
+        "name": "Rebecca Ferguson",
+        "character": "Lady Jessica",
+        "photo_url": "/_mock/img/185x185/cast2.svg"
+      },
+      {
+        "name": "Javier Bardem",
+        "character": "Stilgar",
+        "photo_url": null
+      },
+      {
+        "name": "Josh Brolin",
+        "character": "Gurney Halleck",
+        "photo_url": "/_mock/img/185x185/cast4.svg"
+      },
+      {
+        "name": "Austin Butler",
+        "character": "Feyd-Rautha Harkonnen",
+        "photo_url": "/_mock/img/185x185/cast5.svg"
+      },
+      {
+        "name": "Florence Pugh",
+        "character": "Princess Irulan",
+        "photo_url": "/_mock/img/185x185/cast6.svg"
+      },
+      {
+        "name": "Dave Bautista",
+        "character": "Glossu Rabban",
+        "photo_url": null
+      },
+      {
+        "name": "Christopher Walken",
+        "character": "Emperor Shaddam IV",
+        "photo_url": "/_mock/img/185x185/cast8.svg"
+      },
+      {
+        "name": "Léa Seydoux",
+        "character": "Lady Margot Fenring",
+        "photo_url": "/_mock/img/185x185/cast9.svg"
+      },
+      {
+        "name": "Stellan Skarsgård",
+        "character": "Baron Vladimir Harkonnen",
+        "photo_url": "/_mock/img/185x185/cast10.svg"
+      },
+      {
+        "name": "Charlotte Rampling",
+        "character": "Reverend Mother Mohiam",
+        "photo_url": null
+      }
+    ],
+    "crew": {
+      "directors": [
+        "Denis Villeneuve"
+      ],
+      "writers": [
+        "Denis Villeneuve",
+        "Jon Spaihts"
+      ],
+      "creators": []
+    },
+    "networks": [],
+    "studios": [
+      "Legendary Pictures"
+    ],
+    "trailer_url": null,
+    "episode": null,
+    "series": null,
+    "music": null,
+    "live": null,
+    "facts": [
+      {
+        "label": "Budget",
+        "value": "$190M"
+      },
+      {
+        "label": "Box office",
+        "value": "$714.8M"
+      },
+      {
+        "label": "Based on",
+        "value": "Dune by Frank Herbert"
+      },
+      {
+        "label": "Original language",
+        "value": "English"
+      },
+      {
+        "label": "Filmed in",
+        "value": "Jordan, Abu Dhabi, Hungary"
+      },
+      {
+        "label": "Score",
+        "value": "Hans Zimmer"
+      }
+    ],
+    "ids": {
+      "imdb": "tt15239678",
+      "tmdb": 693134,
+      "musicbrainz": null,
+      "tms": null
+    },
+    "links": {
+      "imdb": "https://www.imdb.com/title/tt15239678/"
+    },
+    "attribution": [
+      "TMDB",
+      "OMDb"
+    ]
+  }
+}

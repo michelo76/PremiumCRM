@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b0d">
+<meta name="color-scheme" content="dark">
+<title>Now Playing</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body class="is-booting">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-movie" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M7 4v16M17 4v16M3 8h4M3 12h4M3 16h4M17 8h4M17 12h4M17 16h4"/></g></symbol>
+    <symbol id="i-episode" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><rect x="2.5" y="5" width="19" height="13" rx="1.5"/><path d="M8 21h8M12 18v3"/></g></symbol>
+    <symbol id="i-music" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M9 18V5.5l11-2.5v12.5"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="15.5" r="2.5"/></g></symbol>
+    <symbol id="i-live_tv" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="7" width="19" height="13" rx="1.5"/><path d="M8 3l4 4 4-4"/><circle cx="12" cy="13.5" r="1.6" fill="currentColor"/></g></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="M10 9v6l5-3z" fill="currentColor"/></g></symbol>
+    <symbol id="i-unknown" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 12h2M8 8v8M12 5v14M16 9v6M20 11v2"/></g></symbol>
+    <symbol id="i-tomato" viewBox="0 0 24 24"><circle cx="12" cy="13.5" r="8.5" fill="#fa320a"/><path d="M8.5 5.2c1.6.4 2.8.2 3.5-.9.6 1.1 2 1.4 3.5.9-.6 1.3-1.8 2-3.5 2s-2.9-.7-3.5-2z" fill="#00912d"/></symbol>
+    <symbol id="i-splat" viewBox="0 0 24 24"><path d="M12 2.5l1.6 4.2 4.2-2.1-1.5 4.4 4.9.8-3.9 3 3.4 3.6-4.8-.3.3 4.9-4.2-2.9L9.8 22l-.6-4.8-4.6 1.4 2.4-4.1-4.4-2.1 4.6-1.5-2-4.3 4.5 1.7z" fill="#0ac855"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.2l2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6-4.5-4.2 6.1-.7z" fill="currentColor"/></symbol>
+  </defs>
+</svg>
+
+<div class="bg" id="bg" aria-hidden="true">
+  <div class="bg-layer"></div>
+  <div class="bg-layer"></div>
+  <div class="bg-scrim"></div>
+  <div class="bg-grain"></div>
+</div>
+
+<div class="conn" id="conn" role="status" aria-live="polite"><span class="conn-dot"></span><span class="conn-text">Reconnecting</span></div>
+
+<main class="app" id="app">
+  <section class="idle" id="idle" aria-live="polite">
+    <div class="idle-inner">
+      <div class="idle-time" id="idle-time"></div>
+      <div class="idle-date" id="idle-date"></div>
+      <div class="idle-rule"></div>
+      <div class="idle-title" id="idle-title"></div>
+      <div class="idle-sub" id="idle-sub"></div>
+    </div>
+  </section>
+
+  <article class="np" id="np">
+    <header class="topbar">
+      <div class="topbar-room" id="room"></div>
+      <div class="topbar-clock" id="clock"></div>
+    </header>
+    <section class="hero" id="hero">
+      <div class="hero-inner">
+        <div class="art" id="art"><div class="art-stack" id="art-stack"></div></div>
+        <div class="info" id="info">
+          <div class="eyebrow" id="eyebrow">
+            <span class="ind" id="ind" data-state="idle"><i></i><i></i><i></i></span>
+            <span class="eyebrow-state" id="eyebrow-state"></span>
+            <span class="eyebrow-source" id="eyebrow-source"></span>
+          </div>
+          <div class="info-body" id="info-body"></div>
+          <div class="progress" id="progress">
+            <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+            <div class="progress-labels">
+              <span class="progress-left" id="progress-left"></span>
+              <span class="progress-right" id="progress-right"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <div class="sections" id="sections"></div>
+    <footer class="foot" id="foot"></footer>
+  </article>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

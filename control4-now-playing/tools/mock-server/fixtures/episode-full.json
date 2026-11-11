@@ -1,0 +1,187 @@
+{
+  "schema": 1,
+  "version": 311,
+  "updated_at": 1790000000,
+  "media_key": "roku|hulu|the bear|s2e7",
+  "room": {
+    "id": 12,
+    "name": "Family Room"
+  },
+  "source": {
+    "provider": "roku",
+    "device_name": "Living Room Roku",
+    "app_name": "Hulu",
+    "app_id": "2285",
+    "app_icon_url": null
+  },
+  "playback": {
+    "state": "playing",
+    "position_s": 1322,
+    "duration_s": 2880,
+    "position_updated_at": 1790000000,
+    "is_live": false,
+    "volume": null
+  },
+  "media": {
+    "kind": "episode",
+    "title": "Forks",
+    "subtitle": null,
+    "series_title": "The Bear",
+    "season": 2,
+    "episode": 7,
+    "episode_title": "Forks",
+    "artist": null,
+    "album": null,
+    "album_artist": null,
+    "track_number": null,
+    "channel_name": null,
+    "channel_number": null,
+    "year": 2023,
+    "genres": [
+      "Drama",
+      "Comedy"
+    ],
+    "artwork_url": null
+  },
+  "details": {
+    "matched": true,
+    "confidence": 0.93,
+    "tagline": null,
+    "overview": "Carmy Berzatto, a young chef from the fine-dining world, comes home to Chicago to run his late brother’s Italian beef sandwich shop. As he fights to transform the shop and himself, he works alongside a rough-around-the-edges kitchen crew that ultimately reveals itself as his chosen family.",
+    "release_date": "2022-06-23",
+    "year": 2022,
+    "runtime_min": 36,
+    "content_rating": "TV-MA",
+    "genres": [
+      "Drama",
+      "Comedy"
+    ],
+    "status": "Returning Series",
+    "poster_url": "https://image.tmdb.org/t/p/w500/sHFlbKS3WLqMnp9t2ghADIJFnuQ.jpg",
+    "backdrop_url": "https://image.tmdb.org/t/p/w1280/ksRTivIwJtL1M4M9cTB5b9AvhtG.jpg",
+    "logo_url": null,
+    "ratings": {
+      "imdb": {
+        "score": 8.5,
+        "votes": 271000
+      },
+      "rotten_tomatoes": 99,
+      "metacritic": 88,
+      "tmdb": 8.2
+    },
+    "cast": [
+      {
+        "name": "Jeremy Allen White",
+        "character": "Carmen “Carmy” Berzatto",
+        "photo_url": "https://image.tmdb.org/t/p/w185/bear0x.jpg"
+      },
+      {
+        "name": "Ebon Moss-Bachrach",
+        "character": "Richard “Richie” Jerimovich",
+        "photo_url": "https://image.tmdb.org/t/p/w185/bear1x.jpg"
+      },
+      {
+        "name": "Ayo Edebiri",
+        "character": "Sydney Adamu",
+        "photo_url": "https://image.tmdb.org/t/p/w185/bear2x.jpg"
+      },
+      {
+        "name": "Lionel Boyce",
+        "character": "Marcus",
+        "photo_url": "https://image.tmdb.org/t/p/w185/bear3x.jpg"
+      },
+      {
+        "name": "Liza Colón-Zayas",
+        "character": "Tina",
+        "photo_url": "https://image.tmdb.org/t/p/w185/bear4x.jpg"
+      },
+      {
+        "name": "Abby Elliott",
+        "character": "Natalie “Sugar” Berzatto",
+        "photo_url": "https://image.tmdb.org/t/p/w185/bear5x.jpg"
+      },
+      {
+        "name": "Matty Matheson",
+        "character": "Neil Fak",
+        "photo_url": "https://image.tmdb.org/t/p/w185/bear6x.jpg"
+      },
+      {
+        "name": "Oliver Platt",
+        "character": "Uncle Jimmy",
+        "photo_url": "https://image.tmdb.org/t/p/w185/bear7x.jpg"
+      },
+      {
+        "name": "Olivia Colman",
+        "character": "Chef Terry",
+        "photo_url": "https://image.tmdb.org/t/p/w185/bear8x.jpg"
+      },
+      {
+        "name": "Will Poulter",
+        "character": "Chef Luca",
+        "photo_url": "https://image.tmdb.org/t/p/w185/bear9x.jpg"
+      }
+    ],
+    "crew": {
+      "directors": [
+        "Christopher Storer"
+      ],
+      "writers": [
+        "Christopher Storer"
+      ],
+      "creators": [
+        "Christopher Storer"
+      ]
+    },
+    "networks": [
+      "FX"
+    ],
+    "studios": [
+      "FX Productions"
+    ],
+    "trailer_url": null,
+    "episode": {
+      "title": "Forks",
+      "overview": "Richie is sent to stage at a world-class restaurant, where a week of polishing forks becomes a lesson in respect, purpose and what it means to serve people.",
+      "air_date": "2023-06-22",
+      "still_url": "https://image.tmdb.org/t/p/w780/forksStill.jpg",
+      "runtime_min": 48,
+      "rating": 9.6
+    },
+    "series": {
+      "seasons": 4,
+      "episodes": 38,
+      "first_air_date": "2022-06-23",
+      "next_episode": {
+        "season": 5,
+        "episode": 1,
+        "air_date": "2027-06-24",
+        "title": "TBA"
+      }
+    },
+    "music": null,
+    "live": null,
+    "facts": [
+      {
+        "label": "Filmed in",
+        "value": "Chicago, Illinois"
+      },
+      {
+        "label": "Emmys",
+        "value": "21 wins"
+      }
+    ],
+    "ids": {
+      "imdb": "tt14452776",
+      "tmdb": 136315,
+      "musicbrainz": null,
+      "tms": null
+    },
+    "links": {
+      "imdb": "https://www.imdb.com/title/tt14452776/"
+    },
+    "attribution": [
+      "TMDB",
+      "OMDb"
+    ]
+  }
+}
