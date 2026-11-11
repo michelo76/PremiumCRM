@@ -1,0 +1,9 @@
+{
+ "resultCount":5,
+ "results": [
+{"wrapperType":"collection", "collectionType":"Album", "artistId":479756766, "collectionId":1499378108, "artistName":"The Weeknd", "collectionName":"After Hours", "artworkUrl100":"https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/6f/23/0e/6f230e2d/20UMGIM12176.rgb.jpg/100x100bb.jpg", "trackCount":14, "copyright":"℗ 2020 The Weeknd XO, Inc., Manufactured and Marketed by Republic Records, a Division of UMG Recordings, Inc.", "country":"USA", "releaseDate":"2020-03-20T07:00:00Z", "primaryGenreName":"R&B/Soul"},
+{"wrapperType":"track", "kind":"song", "collectionId":1499378108, "trackId":11, "artistName":"The Weeknd", "collectionName":"After Hours", "trackName":"Hardest To Love", "discNumber":1, "trackNumber":2, "trackTimeMillis":211410},
+{"wrapperType":"track", "kind":"song", "collectionId":1499378108, "trackId":10, "artistName":"The Weeknd", "collectionName":"After Hours", "trackName":"Alone Again", "discNumber":1, "trackNumber":1, "trackTimeMillis":250051},
+{"wrapperType":"track", "kind":"song", "collectionId":1499378108, "trackId":1499378615, "artistName":"The Weeknd", "collectionName":"After Hours", "trackName":"Blinding Lights", "discNumber":1, "trackNumber":9, "trackTimeMillis":200040},
+{"wrapperType":"track", "kind":"song", "collectionId":1499378108, "trackId":14, "artistName":"The Weeknd", "collectionName":"After Hours", "trackName":"Until I Bleed Out", "discNumber":1, "trackNumber":14, "trackTimeMillis":190539}]
+}

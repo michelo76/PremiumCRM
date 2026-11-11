@@ -1,0 +1,19 @@
+{
+  "entity_id": "media_player.living_room_roku",
+  "state": "playing",
+  "attributes": {
+    "volume_muted": false,
+    "source_list": ["Home", "Netflix", "YouTube", "Prime Video"],
+    "media_content_type": "app",
+    "app_id": "12",
+    "app_name": "Netflix",
+    "source": "Netflix",
+    "media_duration": 2071,
+    "media_position": 1234,
+    "media_position_updated_at": "2026-09-21T10:13:18-04:00",
+    "entity_picture": "/api/media_player_proxy/media_player.living_room_roku?token=feedbeef&cache=a1b2",
+    "friendly_name": "Living Room Roku",
+    "device_class": "tv",
+    "supported_features": 23997
+  }
+}

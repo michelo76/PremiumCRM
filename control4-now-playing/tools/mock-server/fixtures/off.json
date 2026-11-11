@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "version": 1,
+  "updated_at": 1790000000,
+  "media_key": null,
+  "room": {
+    "id": 4,
+    "name": "Theater"
+  },
+  "source": null,
+  "playback": {
+    "state": "off"
+  },
+  "media": null,
+  "details": null
+}

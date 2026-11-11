@@ -1,0 +1,30 @@
+{
+  "entity_id": "media_player.kitchen",
+  "state": "playing",
+  "attributes": {
+    "group_members": ["media_player.kitchen"],
+    "volume_level": 0.22,
+    "is_volume_muted": false,
+    "media_content_id": "x-sonos-spotify:spotify%3atrack%3a0VjIjW4GlUZAMYd2vXMi3b?sid=12&flags=8232&sn=3",
+    "media_content_type": "music",
+    "media_duration": 200,
+    "media_position": 42,
+    "media_position_updated_at": "2026-09-21T14:13:00Z",
+    "media_title": "Blinding Lights",
+    "media_artist": "The Weeknd",
+    "media_album_name": "After Hours",
+    "media_track": 9,
+    "shuffle": false,
+    "repeat": "off",
+    "queue_position": 3,
+    "queue_size": 14,
+    "source": "Spotify",
+    "source_list": ["Line-in", "TV"],
+    "device_class": "speaker",
+    "entity_picture": "https://i.scdn.co/image/ab67616d0000b2738863bc11d2aa12b54f5aeb36",
+    "friendly_name": "Kitchen",
+    "supported_features": 4127295
+  },
+  "last_changed": "2026-09-21T13:59:00+00:00",
+  "last_updated": "2026-09-21T14:13:00+00:00"
+}

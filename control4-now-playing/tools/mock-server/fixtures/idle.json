@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "version": 2,
+  "updated_at": 1790000000,
+  "media_key": null,
+  "room": {
+    "id": 12,
+    "name": "Family Room"
+  },
+  "source": {
+    "provider": "roku",
+    "device_name": "Living Room Roku",
+    "app_name": null,
+    "app_id": null,
+    "app_icon_url": null
+  },
+  "playback": {
+    "state": "idle",
+    "position_s": null,
+    "duration_s": null,
+    "position_updated_at": null,
+    "is_live": false,
+    "volume": null
+  },
+  "media": null,
+  "details": null
+}

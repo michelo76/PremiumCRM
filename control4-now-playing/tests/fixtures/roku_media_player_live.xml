@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<player error="false" state="play">
+	<plugin bandwidth="9012345 bps" id="195316" name="YouTube TV"/>
+	<format audio="aac" captions="none" container="hls" drm="none" video="h264" video_res="1920x1080"/>
+	<buffering current="1000" max="1000" target="0"/>
+	<position>5400100 ms</position>
+	<duration>5410000 ms</duration>
+	<is_live blocked="false">true</is_live>
+</player>

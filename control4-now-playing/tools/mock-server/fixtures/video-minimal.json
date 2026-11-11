@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "version": 5,
+  "updated_at": 1790000000,
+  "media_key": "appletv|youtube|how vinyl records are made",
+  "room": {
+    "id": 4,
+    "name": "Theater"
+  },
+  "source": {
+    "provider": "appletv",
+    "device_name": "Theater Apple TV 4K",
+    "app_name": "YouTube",
+    "app_id": "com.google.ios.youtube",
+    "app_icon_url": null
+  },
+  "playback": {
+    "state": "playing",
+    "position_s": 312,
+    "duration_s": 1104,
+    "position_updated_at": 1790000000,
+    "is_live": false,
+    "volume": null
+  },
+  "media": {
+    "kind": "video",
+    "title": "How Vinyl Records Are Made — Inside a Pressing Plant",
+    "subtitle": "Technology Connections",
+    "series_title": null,
+    "season": null,
+    "episode": null,
+    "episode_title": null,
+    "artist": null,
+    "album": null,
+    "album_artist": null,
+    "track_number": null,
+    "channel_name": null,
+    "channel_number": null,
+    "year": null,
+    "genres": [],
+    "artwork_url": null
+  },
+  "details": null
+}
