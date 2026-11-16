@@ -138,6 +138,25 @@ describe("np.enrich.tmdb", function()
     T.is_nil(r.err); T.is_nil(r.partial); T.eq(fd:count("/movie/"), 0)
   end)
 
+  it("accepts an exact non-Latin title match (and rejects a different one)", function()
+    local plan = { mode = "movie", query = "千と千尋の神隠し", threshold = 0.72 }
+    local best, s = Tmdb.pick(plan, {
+      { id = 1, title = "Spirited Away", original_title = "千と千尋の神隠し", release_date = "2001-07-20", popularity = 80 },
+      { id = 2, title = "Princess Mononoke", original_title = "もののけ姫", release_date = "1997-07-12", popularity = 60 },
+    })
+    T.ok(best, "matched"); T.eq(best.id, 1); T.gt(s, 0.95)
+    local none = Tmdb.pick({ mode = "movie", query = "千と千尋の神隠し", threshold = 0.72 },
+      { { id = 2, title = "Princess Mononoke", original_title = "もののけ姫", popularity = 60 } })
+    T.is_nil(none)
+    -- Cyrillic, end-to-end through /search/movie
+    fd:route("/search/movie", FakeDeps.json({ page = 1, total_results = 1, results = {
+      { id = 7, title = "Москва слезам не верит", original_title = "Москва слезам не верит", release_date = "1980-02-11",
+        popularity = 12, vote_count = 300 } } }))
+    fd:route("/movie/7", FakeDeps.json({ id = 7, title = "Москва слезам не верит", overview = "…", genres = {} }))
+    local r = run(fd, e, pb({ kind = "movie", title = "Москва слезам не верит" }))
+    T.is_nil(r.err); T.ok(r.partial, "Cyrillic exact title accepted"); T.eq(r.partial.ids.tmdb, 7)
+  end)
+
   it("zero results -> no match", function()
     fd:route("/search/movie", FakeDeps.json({ page = 1, results = {}, total_results = 0 }))
     local r = run(fd, e, pb({ kind = "movie", title = "Zzzzz Not A Film" }))

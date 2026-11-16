@@ -689,7 +689,7 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
   var bodyCls = D.body.classList;
   var bgFader = new Fader($('bg'), 'bg-layer', $('bg-scrim'));
   var artFader = new Fader($('art-stack'), 'art-layer');
-  var cur = null, curKey = null, curSig = null, curModel = null, switchTimer = null, artToken = 0;
+  var cur = null, curKey = null, curSig = null, curArtSig = null, curModel = null, switchTimer = null, artToken = 0;
   var skew = 0;               // localNow - controllerNow, seconds
   var prog = null;            // progress model for ticking
   var mode = '';
@@ -728,23 +728,34 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
     return '';
   }
 
-  function startArtwork(M) {
+  function photoOf(M) {
+    return url(M.dd.backdrop_url) || (M.kind === 'music' ? url(obj(M.dd.music).artist_image_url) : '');
+  }
+  // Everything startArtwork depends on: when it changes for the SAME media (enrichment attached
+  // later, provider artwork replaced) the artwork/backdrop are refreshed; otherwise left alone.
+  function artSig(M) { return artCandidates(M).join('\n') + '\u0001' + photoOf(M) + '\u0001' + artShape(M); }
+
+  // refresh = same media, new image URLs: keep the current artwork, accent and backdrop on screen
+  // until the replacement has loaded (crossfade), instead of flashing the placeholder/defaults.
+  function startArtwork(M, refresh) {
     var token = ++artToken, art = $('art');
     art.className = 'art ' + artShape(M);
-    setAccent(KIND_ACCENT[M.kind] || KIND_ACCENT.unknown);
-    startBackdrop(M, token);
+    if (!refresh) setAccent(KIND_ACCENT[M.kind] || KIND_ACCENT.unknown);
+    startBackdrop(M, token, refresh);
     var cands = artCandidates(M), shown = false;
-    var fallbackTimer = setTimeout(function () {
+    var hasImg = refresh && /^img:/.test(artFader.key || '');
+    var fallbackTimer = hasImg ? null : setTimeout(function () {
       if (token === artToken && !shown) { artFader.show('gen:' + M.key, genArt(M)); }
     }, cands.length ? 1200 : 0);
 
     loadFirst(cands, true, function (im, src, cors) {
       if (token !== artToken) return;
-      if (!im) { clearTimeout(fallbackTimer); artFader.show('gen:' + M.key, genArt(M)); return; }
-      shown = true; clearTimeout(fallbackTimer);
+      clearTimeout(fallbackTimer);
+      if (!im) { artFader.show('gen:' + M.key, genArt(M)); backdropArt(null, token, ''); return; }
+      shown = true;
       artFader.show('img:' + src, im);
       if (cors) { var a = sampleAccent(im); if (a) setAccent(a); }
-      backdropArt(im, token);
+      backdropArt(im, token, src);
     });
   }
 
@@ -752,27 +763,28 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
   // Backdrop: a real backdrop photo when available (loaded in parallel with the artwork); otherwise a
   // pre-blurred copy of the artwork; otherwise a generated accent gradient.
   var bgState = { token: 0, photo: 'none', art: null };
-  function startBackdrop(M, token) {
-    var photo = url(M.dd.backdrop_url) || (M.kind === 'music' ? url(obj(M.dd.music).artist_image_url) : '');
+  function startBackdrop(M, token, refresh) {
+    var photo = photoOf(M);
     bgState = { token: token, photo: photo ? 'loading' : 'none', art: null, M: M };
-    if (!photo) { bodyCls.add('no-photo'); bgFader.show('gen:' + M.kind, genBackdrop()); return; }
-    bodyCls.remove('no-photo');
-    if (bgFader.key === 'photo:' + photo) { bgState.photo = 'ok'; return; }
+    // (on a refresh without a photo the blurred artwork replaces the current backdrop once it loads)
+    if (!photo) { bodyCls.add('no-photo'); if (!refresh) bgFader.show('gen:' + M.kind, genBackdrop()); return; }
+    if (bgFader.key === 'photo:' + photo) { bodyCls.remove('no-photo'); bgState.photo = 'ok'; return; }
+    if (!refresh) bodyCls.remove('no-photo');
     loadArt(photo, false, function (im) {
       if (token !== artToken) return;
       if (!im) { bgState.photo = 'none'; bodyCls.add('no-photo'); softBackdrop(); return; }
-      bgState.photo = 'ok';
+      bgState.photo = 'ok'; bodyCls.remove('no-photo');
       var w = el('div', 'bg-photo'); w.appendChild(im); bgFader.show('photo:' + photo, w);
     });
   }
-  function backdropArt(im, token) {
+  function backdropArt(im, token, src) {
     if (token !== bgState.token) return;
-    bgState.art = im;
+    bgState.art = im; bgState.src = src;
     if (bgState.photo === 'none') softBackdrop();
   }
   function softBackdrop() {
     var c = bgState.art && softCanvas(bgState.art), M = bgState.M;
-    if (c) { var w = el('div', 'bg-soft'); w.appendChild(c); bgFader.show('soft:' + M.key, w); }
+    if (c) { var w = el('div', 'bg-soft'); w.appendChild(c); bgFader.show('soft:' + M.key + '\u0001' + bgState.src, w); }
     else bgFader.show('gen:' + M.kind, genBackdrop());
   }
 
@@ -1221,8 +1233,9 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
     if (M.idle) { curModel = null; return showIdle(M); }
     var first = mode !== 'np';
     setMode('np');
+    var as = artSig(M);
     if (M.key !== curKey) {
-      curKey = M.key; curSig = M.sig;
+      curKey = M.key; curSig = M.sig; curArtSig = as;
       startArtwork(M);
       clearTimeout(switchTimer);
       if (first || !curModel) { buildStatic(M); }
@@ -1233,6 +1246,8 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
       }
     } else if (M.sig !== curSig) {
       curSig = M.sig;
+      // same media, new image URLs (enrichment attached after the first publish): crossfade to them
+      if (as !== curArtSig) { curArtSig = as; startArtwork(M, true); }
       if (curModelPending) curModelPending = M; else buildStatic(M);
     } else if (curModelPending) curModelPending = M;
     updateDynamic(M);

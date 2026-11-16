@@ -19,6 +19,10 @@
  * corrects clock skew with the driver's sent_at. Remote images are served by a local route
  * (placeholder SVGs); LAN images (192.168.x) are only reachable in http mode -- in Navigator
  * mode the page must ask the driver instead (asserted).
+ * Scenarios with a <name>.pre.json (the state the engine publishes BEFORE enrichment, same
+ * media_key) are also replayed as a live sequence on an open page (http and fake C4):
+ * pre -> enriched -> enriched again with unchanged image URLs. The artwork must switch to the
+ * enriched poster/backdrop, and the unchanged-URL update must keep the same <img> node.
  * Exit code 0 = all assertions passed. Screenshots go to <shots_dir> (default <states_dir>/shots).
  */
 'use strict';
@@ -35,6 +39,7 @@ fs.mkdirSync(SHOTS, { recursive: true });
 
 const index = JSON.parse(fs.readFileSync(path.join(STATES, 'index.json'), 'utf8'));
 const read = (n) => fs.readFileSync(path.join(STATES, n), 'utf8');
+const seqBody = {}; // sequence id -> state JSON currently served at /seq/<id> (http transport)
 
 // ---------------------------------------------------------------- local server (page + states)
 const server = http.createServer((req, res) => {
@@ -42,6 +47,11 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/' || u.pathname === '/index.html') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(fs.readFileSync(path.join(WWW, 'index.html')));
+  }
+  const sq = /^\/seq\/([\w-]+)$/.exec(u.pathname);
+  if (sq) {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    return res.end(seqBody[sq[1]] || '{}');
   }
   const m = /^\/state\/([\w-]+)$/.exec(u.pathname);
   if (m) {
@@ -228,6 +238,78 @@ async function run(browser, base, sc, transport, viewport, shot, extraQuery) {
   return ui;
 }
 
+// ---------------------------------------------------------------- same media_key: unenriched -> enriched
+async function runSequence(browser, base, sc, transport) {
+  const pre = read(sc.name + '.pre.json'), fin = read(sc.name + '.json');
+  const ps = JSON.parse(pre), st = JSON.parse(fin), d = st.details;
+  const bumped = JSON.parse(fin); // a later update of the same media, same image URLs (position moved)
+  bumped.version += 1; bumped.playback.position_s = (bumped.playback.position_s || 0) + 5;
+  const artReplies = JSON.parse(read(sc.name + '.artwork.json'));
+  const tag = `${sc.name}/sequence/${transport}`;
+  const id = sc.name + '-' + transport;
+  seqBody[id] = pre;
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+  await page.route(/^https?:\/\/(?!127\.0\.0\.1)/, (route) => {
+    route.fulfill({ status: 200, contentType: 'image/svg+xml', headers: { 'Access-Control-Allow-Origin': '*' }, body: imageFor(route.request().url()) });
+  });
+  if (transport !== 'http') {
+    await page.addInitScript(([stateJson, replies]) => {
+      const log = window.__c4log = [];
+      const send = (fn, x) => setTimeout(() => window[fn](x), 20);
+      window.__push = (json) => send('onDataToUi', { NOW_PLAYING: { state: json } });
+      window.C4 = {
+        subscribeToDataToUi: () => {}, subscribeToVariable: () => {},
+        sendCommand: (name, params) => {
+          log.push('sendCommand:' + name + ':' + params);
+          if (name === 'GET_STATE') send('onDataToUi', { NOW_PLAYING: { state: stateJson } });
+          if (name === 'GET_ARTWORK') {
+            const url = JSON.parse(params).url, r = replies.find((x) => x.params.url === url);
+            send('onDataToUi', { NOW_PLAYING_ARTWORK: r ? r.params : { url, error: 'not in current state' } });
+          }
+        },
+      };
+    }, [pre, artReplies]);
+  }
+  await page.goto(base + '/index.html' + (transport === 'http' ? '?api=/seq/' + id : '?x=1'));
+  const artSrc = () => page.evaluate(() => { const i = document.querySelector('#art-stack .art-layer.is-on img'); return i ? i.getAttribute('src') : null; });
+  const bgSrc = () => page.evaluate(() => { const i = document.querySelector('#bg .bg-layer.is-on .bg-photo img'); return i ? i.getAttribute('src') : null; });
+  const waitFor = async (fn, want, ms) => {
+    const end = Date.now() + ms; let v;
+    while (Date.now() < end) { v = await fn(); if (want(v)) return v; await page.waitForTimeout(100); }
+    return v;
+  };
+  // 1. unenriched: provider (LAN) artwork -- direct in http mode, driver data: URI in Navigator mode
+  const a0 = await waitFor(artSrc, (v) => !!v, 6000);
+  if (transport === 'http') check(a0 === ps.media.artwork_url, `${tag}: pre artwork ${a0}`);
+  else check(/^data:image\/png;base64,/.test(a0 || ''), `${tag}: pre artwork via GET_ARTWORK, got ${String(a0).slice(0, 40)}`);
+  // 2. same media_key, enrichment attached -> TMDB poster + backdrop replace the provider artwork
+  if (transport === 'http') seqBody[id] = fin; else await page.evaluate((j) => window.__push(j), fin);
+  const a1 = await waitFor(artSrc, (v) => v === d.poster_url, 6000);
+  check(a1 === d.poster_url, `${tag}: enriched poster not shown (art ${String(a1).slice(0, 60)})`);
+  if (d.backdrop_url) {
+    const b1 = await waitFor(bgSrc, (v) => v === d.backdrop_url, 4000);
+    check(b1 === d.backdrop_url, `${tag}: enriched backdrop not shown (${b1})`);
+  }
+  check(await page.evaluate((t) => document.querySelector('h1.title').textContent === t, st.media.title), tag + ': title');
+  // 3. another update with the same image URLs: the artwork <img> node must survive (no reload / flicker)
+  await page.waitForTimeout(1600); // let the crossfade finish
+  await page.evaluate(() => { document.querySelector('#art-stack .art-layer.is-on img').__npMark = 1; });
+  if (transport === 'http') seqBody[id] = JSON.stringify(bumped); else await page.evaluate((j) => window.__push(j), JSON.stringify(bumped));
+  await page.waitForTimeout(transport === 'http' ? 2600 : 400); // http polls every 2 s
+  const kept = await page.evaluate(() => {
+    const layers = document.querySelectorAll('#art-stack .art-layer');
+    const i = document.querySelector('#art-stack .art-layer.is-on img');
+    return { n: layers.length, marked: !!(i && i.__npMark), src: i && i.getAttribute('src').slice(0, 70) };
+  });
+  check(kept.marked && kept.n === 1 && kept.src === d.poster_url.slice(0, 70), `${tag}: unchanged-URL update recreated the artwork (${JSON.stringify(kept)})`);
+  errors.forEach((e) => failures.push(tag + ': ' + e));
+  await ctx.close();
+}
+
 (async () => {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = 'http://127.0.0.1:' + server.address().port;
@@ -241,6 +323,7 @@ async function run(browser, base, sc, transport, viewport, shot, extraQuery) {
     await run(browser, base, sc, 'c4-dtu', PHONE, `${sc.name}-c4-dtu-390x844.png`); runs++;
     if (['episode', 'music', 'movie'].indexOf(sc.name) >= 0) { await run(browser, base, sc, 'http', HD, `${sc.name}-http-1920x1080.png`); runs++; }
     if (['episode', 'music'].indexOf(sc.name) >= 0) { await run(browser, base, sc, 'http', DESK, `${sc.name}-kiosk-1280x800.png`, '&kiosk=1'); runs++; }
+    if (sc.pre) for (const transport of ['http', 'c4-dtu']) { await runSequence(browser, base, sc, transport); runs++; }
   }
   await browser.close();
   server.close();
