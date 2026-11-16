@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<device-info>
+	<udn>29380007-0800-1025-80a4-d83134a1b2c3</udn>
+	<serial-number>X01900ABCDEF</serial-number>
+	<device-id>S00820ABCDEF</device-id>
+	<advertising-id>a1b2c3d4-0000-5555-aaaa-0123456789ab</advertising-id>
+	<vendor-name>TCL</vendor-name>
+	<model-name>65R635</model-name>
+	<model-number>C135X</model-number>
+	<model-region>US</model-region>
+	<is-tv>true</is-tv>
+	<is-stick>false</is-stick>
+	<screen-size>65</screen-size>
+	<panel-id>11</panel-id>
+	<mobile-has-live-tv>true</mobile-has-live-tv>
+	<ui-resolution>1080p</ui-resolution>
+	<tuner-type>ATSC</tuner-type>
+	<supports-ethernet>true</supports-ethernet>
+	<wifi-mac>d8:31:34:a1:b2:c3</wifi-mac>
+	<wifi-driver>realtek</wifi-driver>
+	<has-wifi-extender>false</has-wifi-extender>
+	<has-wifi-5G-support>true</has-wifi-5G-support>
+	<can-use-wifi-extender>true</can-use-wifi-extender>
+	<ethernet-mac>d8:31:34:a1:b2:c4</ethernet-mac>
+	<network-type>ethernet</network-type>
+	<network-name></network-name>
+	<friendly-device-name>Living Room TV</friendly-device-name>
+	<friendly-model-name>TCL•Roku TV</friendly-model-name>
+	<default-device-name>TCL•Roku TV - X01900ABCDEF</default-device-name>
+	<user-device-name>Living Room Roku</user-device-name>
+	<user-device-location>Living Room</user-device-location>
+	<build-number>CHD.55E04174A</build-number>
+	<software-version>12.5.5</software-version>
+	<software-build>4174</software-build>
+	<secure-device>true</secure-device>
+	<language>en</language>
+	<country>US</country>
+	<locale>en_US</locale>
+	<time-zone-auto>true</time-zone-auto>
+	<time-zone>US/Eastern</time-zone>
+	<time-zone-name>United States/Eastern</time-zone-name>
+	<time-zone-tz>America/New_York</time-zone-tz>
+	<time-zone-offset>-300</time-zone-offset>
+	<clock-format>12-hour</clock-format>
+	<uptime>384011</uptime>
+	<power-mode>DisplayOff</power-mode>
+	<supports-suspend>true</supports-suspend>
+	<supports-find-remote>true</supports-find-remote>
+	<supports-audio-guide>true</supports-audio-guide>
+	<supports-rva>true</supports-rva>
+	<developer-enabled>false</developer-enabled>
+	<keyed-developer-id/>
+	<search-enabled>true</search-enabled>
+	<search-channels-enabled>true</search-channels-enabled>
+	<voice-search-enabled>true</voice-search-enabled>
+	<supports-private-listening>true</supports-private-listening>
+	<headphones-connected>false</headphones-connected>
+	<supports-ecs-textedit>true</supports-ecs-textedit>
+	<supports-ecs-microphone>true</supports-ecs-microphone>
+	<supports-wake-on-wlan>false</supports-wake-on-wlan>
+	<has-play-on-roku>true</has-play-on-roku>
+	<has-mobile-screensaver>true</has-mobile-screensaver>
+	<support-url>roku.com/support</support-url>
+	<grandcentral-version>11.1.31</grandcentral-version>
+	<davinci-version>2.8.20</davinci-version>
+	<av-sync-calibration-enabled>3.0</av-sync-calibration-enabled>
+</device-info>

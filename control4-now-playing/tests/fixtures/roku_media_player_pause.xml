@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<player error="false" state="pause">
+	<plugin bandwidth="24510417 bps" id="12" name="Netflix"/>
+	<format audio="eac3" captions="none" container="mp4" drm="widevine" video="hevc" video_res="3840x2160"/>
+	<buffering current="1000" max="1000" target="0"/>
+	<new_stream speed="128000 bps"/>
+	<position>1240000 ms</position>
+	<duration>2071000 ms</duration>
+	<is_live blocked="false">false</is_live>
+	<runtime>1260133 ms</runtime>
+	<stream_segment bitrate="15880000" media_sequence="412" segment_type="mux" time="1230000"/>
+</player>

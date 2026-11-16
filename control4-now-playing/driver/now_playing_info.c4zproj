@@ -1,0 +1,9 @@
+<Driver type="c4z" name="now_playing_info" squishLua="false" manualsquish="false">
+  <Items>
+    <Item type="dir" name="c4" c4zDir="c4" recurse="true"/>
+    <Item type="dir" name="np" c4zDir="np" recurse="true"/>
+    <Item type="dir" name="www" c4zDir="www" recurse="true"/>
+    <Item type="file" name="driver.xml"/>
+    <Item type="file" name="driver.lua"/>
+  </Items>
+</Driver>

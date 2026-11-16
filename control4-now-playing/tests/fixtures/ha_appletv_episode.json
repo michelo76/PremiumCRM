@@ -1,0 +1,26 @@
+{
+  "entity_id": "media_player.living_room_apple_tv",
+  "state": "playing",
+  "attributes": {
+    "volume_level": 0.45,
+    "is_volume_muted": false,
+    "media_content_id": "a1b2c3",
+    "media_content_type": "tvshow",
+    "media_duration": 2460,
+    "media_position": 600,
+    "media_position_updated_at": "2026-09-21T14:12:20.123456+00:00",
+    "media_title": "Forks",
+    "media_series_title": "The Bear",
+    "media_season": "2",
+    "media_episode": "7",
+    "app_id": "com.hulu.plus",
+    "app_name": "Hulu",
+    "device_class": "tv",
+    "entity_picture": "/api/media_player_proxy/media_player.living_room_apple_tv?token=0123abcd&cache=9f8e7d",
+    "friendly_name": "Living Room Apple TV",
+    "supported_features": 317375
+  },
+  "last_changed": "2026-09-21T14:02:01.000000+00:00",
+  "last_updated": "2026-09-21T14:12:20.200000+00:00",
+  "context": {"id": "01J8ZZZZ", "parent_id": null, "user_id": null}
+}

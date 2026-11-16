@@ -1,0 +1,147 @@
+{
+  "schema": 1,
+  "version": 77,
+  "updated_at": 1790000000,
+  "media_key": "appletv|peacock|the office|s4e9",
+  "room": {
+    "id": 7,
+    "name": "Bedroom"
+  },
+  "source": {
+    "provider": "appletv",
+    "device_name": "Bedroom Apple TV",
+    "app_name": "Peacock",
+    "app_id": null,
+    "app_icon_url": null
+  },
+  "playback": {
+    "state": "paused",
+    "position_s": 811,
+    "duration_s": 1817,
+    "position_updated_at": 1790000000,
+    "is_live": false,
+    "volume": null
+  },
+  "media": {
+    "kind": "episode",
+    "title": "Dinner Party",
+    "subtitle": null,
+    "series_title": "The Office",
+    "season": 4,
+    "episode": 9,
+    "episode_title": "Dinner Party",
+    "artist": null,
+    "album": null,
+    "album_artist": null,
+    "track_number": null,
+    "channel_name": null,
+    "channel_number": null,
+    "year": 2008,
+    "genres": [
+      "Comedy"
+    ],
+    "artwork_url": null
+  },
+  "details": {
+    "matched": true,
+    "confidence": 0.95,
+    "tagline": null,
+    "overview": "The everyday lives of office employees in the Scranton, Pennsylvania branch of the fictional Dunder Mifflin Paper Company.",
+    "release_date": "2005-03-24",
+    "year": 2005,
+    "runtime_min": 22,
+    "content_rating": "TV-14",
+    "genres": [
+      "Comedy"
+    ],
+    "status": "Ended",
+    "poster_url": "https://image.tmdb.org/t/p/w500/7DJKHzAi83BmQrWLrYYOqcoKfhR.jpg",
+    "backdrop_url": "https://image.tmdb.org/t/p/w1280/mLyW3UTgi2lsMdtueYODcfAB9Ku.jpg",
+    "logo_url": null,
+    "ratings": {
+      "imdb": {
+        "score": 9,
+        "votes": 760000
+      },
+      "rotten_tomatoes": 81,
+      "metacritic": null,
+      "tmdb": 8.6
+    },
+    "cast": [
+      {
+        "name": "Steve Carell",
+        "character": "Michael Scott",
+        "photo_url": null
+      },
+      {
+        "name": "Rainn Wilson",
+        "character": "Dwight Schrute",
+        "photo_url": null
+      },
+      {
+        "name": "John Krasinski",
+        "character": "Jim Halpert",
+        "photo_url": null
+      },
+      {
+        "name": "Jenna Fischer",
+        "character": "Pam Beesly",
+        "photo_url": null
+      },
+      {
+        "name": "Melora Hardin",
+        "character": "Jan Levinson",
+        "photo_url": null
+      }
+    ],
+    "crew": {
+      "directors": [
+        "Paul Feig"
+      ],
+      "writers": [
+        "Gene Stupnitsky",
+        "Lee Eisenberg"
+      ],
+      "creators": [
+        "Greg Daniels",
+        "Ricky Gervais",
+        "Stephen Merchant"
+      ]
+    },
+    "networks": [
+      "NBC"
+    ],
+    "studios": [
+      "Deedle-Dee Productions",
+      "Universal Television"
+    ],
+    "trailer_url": null,
+    "episode": {
+      "title": "Dinner Party",
+      "overview": "Michael and Jan host a dinner party at their condo, and the evening unravels in front of their guests.",
+      "air_date": "2008-04-10",
+      "still_url": null,
+      "runtime_min": 22,
+      "rating": 9.4
+    },
+    "series": {
+      "seasons": 9,
+      "episodes": 201,
+      "first_air_date": "2005-03-24",
+      "next_episode": null
+    },
+    "music": null,
+    "live": null,
+    "facts": [],
+    "ids": {
+      "imdb": "tt0386676",
+      "tmdb": 2316,
+      "musicbrainz": null,
+      "tms": null
+    },
+    "links": {},
+    "attribution": [
+      "TMDB"
+    ]
+  }
+}

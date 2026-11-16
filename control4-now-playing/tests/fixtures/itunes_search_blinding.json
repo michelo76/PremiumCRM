@@ -1,0 +1,12 @@
+
+
+{
+ "resultCount":4,
+ "results": [
+{"wrapperType":"track", "kind":"song", "artistId":479756766, "collectionId":1499378108, "trackId":1499378615, "artistName":"The Weeknd", "collectionName":"After Hours", "trackName":"Blinding Lights", "collectionCensoredName":"After Hours", "trackCensoredName":"Blinding Lights", "artistViewUrl":"https://music.apple.com/us/artist/the-weeknd/479756766?uo=4", "collectionViewUrl":"https://music.apple.com/us/album/blinding-lights/1499378108?i=1499378615&uo=4", "trackViewUrl":"https://music.apple.com/us/album/blinding-lights/1499378108?i=1499378615&uo=4", "previewUrl":"https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview/x.m4a", "artworkUrl30":"https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/6f/23/0e/6f230e2d/20UMGIM12176.rgb.jpg/30x30bb.jpg", "artworkUrl60":"https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/6f/23/0e/6f230e2d/20UMGIM12176.rgb.jpg/60x60bb.jpg", "artworkUrl100":"https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/6f/23/0e/6f230e2d/20UMGIM12176.rgb.jpg/100x100bb.jpg", "collectionPrice":10.99, "trackPrice":1.29, "releaseDate":"2019-11-29T12:00:00Z", "collectionExplicitness":"explicit", "trackExplicitness":"notExplicit", "discCount":1, "discNumber":1, "trackCount":14, "trackNumber":9, "trackTimeMillis":200040, "country":"USA", "currency":"USD", "primaryGenreName":"R&B/Soul", "isStreamable":true},
+{"wrapperType":"track", "kind":"song", "artistId":479756766, "collectionId":1488408555, "trackId":1488408568, "artistName":"The Weeknd", "collectionName":"Blinding Lights - Single", "trackName":"Blinding Lights", "artworkUrl100":"https://is1-ssl.mzstatic.com/image/thumb/Music113/v4/single/100x100bb.jpg", "releaseDate":"2019-11-29T12:00:00Z", "trackNumber":1, "trackTimeMillis":201570, "primaryGenreName":"R&B/Soul"},
+{"wrapperType":"track", "kind":"song", "artistId":1, "collectionId":2, "trackId":3, "artistName":"Piano Tribute Players", "collectionName":"Piano Tribute to The Weeknd", "trackName":"Blinding Lights (Piano Version)", "artworkUrl100":"https://is1-ssl.mzstatic.com/image/thumb/x/100x100bb.jpg", "releaseDate":"2020-05-01T07:00:00Z", "trackNumber":3, "trackTimeMillis":190000, "primaryGenreName":"Pop"},
+{"wrapperType":"track", "kind":"music-video", "artistId":479756766, "trackId":4, "artistName":"The Weeknd", "trackName":"Blinding Lights", "artworkUrl100":"https://is1-ssl.mzstatic.com/image/thumb/mv/100x100bb.jpg", "releaseDate":"2020-01-21T08:00:00Z", "trackTimeMillis":263000, "primaryGenreName":"R&B/Soul"}]
+}
+
+

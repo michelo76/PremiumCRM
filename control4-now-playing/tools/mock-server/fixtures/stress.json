@@ -1,0 +1,305 @@
+{
+  "schema": 1,
+  "version": 9001,
+  "updated_at": 1790000000,
+  "media_key": "homeassistant|plex|stress",
+  "room": {
+    "id": 99,
+    "name": "The Extremely Long Named Downstairs Entertainment & Billiards Room"
+  },
+  "source": {
+    "provider": "homeassistant",
+    "device_name": "Downstairs Media Player With An Unreasonably Long Device Name (Plex HTPC)",
+    "app_name": "Plex Media Server Enterprise Edition",
+    "app_id": null,
+    "app_icon_url": "https://example.invalid/icon.png"
+  },
+  "playback": {
+    "state": "buffering",
+    "position_s": 99999,
+    "duration_s": 15780,
+    "position_updated_at": 1790000000,
+    "is_live": false,
+    "volume": 100
+  },
+  "media": {
+    "kind": "movie",
+    "title": "Everything Everywhere All at Once: The Extended Multiversal Director’s Cut With Additional Commentary and Bonus Universes Supercalifragilisticexpialidocious",
+    "subtitle": "An absurdly long subtitle that keeps going well beyond what any reasonable layout would expect to accommodate on a single line",
+    "series_title": null,
+    "season": null,
+    "episode": null,
+    "episode_title": null,
+    "artist": null,
+    "album": null,
+    "album_artist": null,
+    "track_number": null,
+    "channel_name": null,
+    "channel_number": null,
+    "year": 2022,
+    "genres": [
+      "Science Fiction",
+      "Action",
+      "Adventure",
+      "Comedy",
+      "Drama",
+      "Fantasy",
+      "Martial Arts",
+      "Absurdist",
+      "Family"
+    ],
+    "artwork_url": "https://example.invalid/poster.jpg"
+  },
+  "details": {
+    "matched": true,
+    "confidence": 0.41,
+    "tagline": "The universe is so much bigger than you realize — and this tagline is far, far longer than it has any right to be.",
+    "overview": "An aging Chinese immigrant is swept up in an insane adventure, where she alone can save what’s important to her by connecting with the lives she could have led in other universes. An aging Chinese immigrant is swept up in an insane adventure, where she alone can save what’s important to her by connecting with the lives she could have led in other universes. An aging Chinese immigrant is swept up in an insane adventure, where she alone can save what’s important to her by connecting with the lives she could have led in other universes. An aging Chinese immigrant is swept up in an insane adventure, where she alone can save what’s important to her by connecting with the lives she could have led in other universes. An aging Chinese immigrant is swept up in an insane adventure, where she alone can save what’s important to her by connecting with the lives she could have led in other universes. An aging Chinese immigrant is swept up in an insane adventure, where she alone can save what’s important to her by connecting with the lives she could have led in other universes.",
+    "release_date": "2022-03-25",
+    "year": 2022,
+    "runtime_min": 263,
+    "content_rating": "R",
+    "genres": [
+      "Science Fiction",
+      "Action",
+      "Adventure",
+      "Comedy",
+      "Drama",
+      "Fantasy",
+      "Martial Arts",
+      "Absurdist",
+      "Family"
+    ],
+    "status": "Released",
+    "poster_url": "https://example.invalid/poster.jpg",
+    "backdrop_url": "https://example.invalid/backdrop.jpg",
+    "logo_url": "https://example.invalid/logo.png",
+    "ratings": {
+      "imdb": {
+        "score": 7.8,
+        "votes": 591234
+      },
+      "rotten_tomatoes": 33,
+      "metacritic": 35,
+      "tmdb": 7.8
+    },
+    "cast": [
+      {
+        "name": "Maximilian Alexander von Hohenzollern-Sigmaringen",
+        "character": "Character number 1 / Alternate Universe Variant With Hot-Dog Fingers",
+        "photo_url": "https://example.invalid/c0.jpg"
+      },
+      {
+        "name": "Jo",
+        "character": null,
+        "photo_url": null
+      },
+      {
+        "name": "Ngozi Adaeze Okonkwo-Fitzgerald",
+        "character": "Character number 3",
+        "photo_url": "https://example.invalid/c2.jpg"
+      },
+      {
+        "name": "Søren Kierkegaard-Østergaard",
+        "character": "Character number 4 / Alternate Universe Variant With Hot-Dog Fingers",
+        "photo_url": null
+      },
+      {
+        "name": "李小龍",
+        "character": "Character number 5",
+        "photo_url": "https://example.invalid/c4.jpg"
+      },
+      {
+        "name": "María José Carreño Quiñones",
+        "character": "Character number 6",
+        "photo_url": null
+      },
+      {
+        "name": "Anne-Marie Duff",
+        "character": null,
+        "photo_url": "https://example.invalid/c6.jpg"
+      },
+      {
+        "name": "Sir Christopher Frank Carandini Lee",
+        "character": "Character number 8",
+        "photo_url": null
+      },
+      {
+        "name": "Ö",
+        "character": "Character number 9",
+        "photo_url": "https://example.invalid/c8.jpg"
+      },
+      {
+        "name": "Benedict Timothy Carlton Cumberbatch",
+        "character": "Character number 10 / Alternate Universe Variant With Hot-Dog Fingers",
+        "photo_url": null
+      },
+      {
+        "name": "Aubrey Plaza",
+        "character": "Character number 11",
+        "photo_url": "https://example.invalid/c10.jpg"
+      },
+      {
+        "name": "Florence Kasumba",
+        "character": null,
+        "photo_url": null
+      },
+      {
+        "name": "Zoë Kravitz",
+        "character": "Character number 13 / Alternate Universe Variant With Hot-Dog Fingers",
+        "photo_url": "https://example.invalid/c12.jpg"
+      },
+      {
+        "name": "Saoirse Ronan",
+        "character": "Character number 14",
+        "photo_url": null
+      },
+      {
+        "name": "Chiwetel Ejiofor",
+        "character": "Character number 15",
+        "photo_url": "https://example.invalid/c14.jpg"
+      },
+      {
+        "name": "Mahershala Ali",
+        "character": "Character number 16 / Alternate Universe Variant With Hot-Dog Fingers",
+        "photo_url": null
+      },
+      {
+        "name": "Tilda Swinton",
+        "character": null,
+        "photo_url": "https://example.invalid/c16.jpg"
+      },
+      {
+        "name": "Brendan Gleeson",
+        "character": "Character number 18",
+        "photo_url": null
+      },
+      {
+        "name": "Ke Huy Quan",
+        "character": "Character number 19 / Alternate Universe Variant With Hot-Dog Fingers",
+        "photo_url": "https://example.invalid/c18.jpg"
+      },
+      {
+        "name": "Michelle Yeoh",
+        "character": "Character number 20",
+        "photo_url": null
+      },
+      {
+        "name": "Jamie Lee Curtis",
+        "character": "Character number 21",
+        "photo_url": "https://example.invalid/c20.jpg"
+      },
+      {
+        "name": "Stephanie Hsu",
+        "character": null,
+        "photo_url": null
+      },
+      {
+        "name": "James Hong",
+        "character": "Character number 23",
+        "photo_url": "https://example.invalid/c22.jpg"
+      },
+      {
+        "name": "Harry Shum Jr.",
+        "character": "Character number 24",
+        "photo_url": null
+      },
+      {
+        "name": "Jenny Slate",
+        "character": "Character number 25 / Alternate Universe Variant With Hot-Dog Fingers",
+        "photo_url": "https://example.invalid/c24.jpg"
+      },
+      {
+        "name": "Tallie Medel",
+        "character": "Character number 26",
+        "photo_url": null
+      },
+      {
+        "name": "Andy Le",
+        "character": null,
+        "photo_url": "https://example.invalid/c26.jpg"
+      },
+      {
+        "name": "Brian Le",
+        "character": "Character number 28 / Alternate Universe Variant With Hot-Dog Fingers",
+        "photo_url": null
+      },
+      {
+        "name": "Audrey Wasilewski",
+        "character": "Character number 29",
+        "photo_url": "https://example.invalid/c28.jpg"
+      },
+      {
+        "name": "Peter Banifaz",
+        "character": "Character number 30",
+        "photo_url": null
+      }
+    ],
+    "crew": {
+      "directors": [
+        "Daniel Kwan",
+        "Daniel Scheinert"
+      ],
+      "writers": [
+        "Daniel Kwan",
+        "Daniel Scheinert",
+        "A Very Long Writer Name The Third",
+        "Another Writer"
+      ],
+      "creators": []
+    },
+    "networks": [],
+    "studios": [
+      "A24",
+      "AGBO",
+      "IAC Films",
+      "Year of the Rat",
+      "Ley Line Entertainment",
+      "Hotdog Hands"
+    ],
+    "trailer_url": null,
+    "episode": null,
+    "series": null,
+    "music": null,
+    "live": null,
+    "facts": [
+      {
+        "label": "Budget",
+        "value": "$14.3M"
+      },
+      {
+        "label": "Box office",
+        "value": "$143.4M"
+      },
+      {
+        "label": "Academy Awards",
+        "value": "Seven wins including Best Picture, Best Director, Best Actress, Best Supporting Actor, Best Supporting Actress, Best Original Screenplay and Best Film Editing"
+      },
+      {
+        "label": "An unusually verbose fact label that wraps",
+        "value": "Short"
+      },
+      {
+        "label": "Empty",
+        "value": ""
+      },
+      {
+        "label": "Number",
+        "value": 42
+      }
+    ],
+    "ids": {
+      "imdb": "tt6710474",
+      "tmdb": 545611,
+      "musicbrainz": null,
+      "tms": null
+    },
+    "links": {},
+    "attribution": [
+      "TMDB",
+      "OMDb",
+      "Wikidata",
+      "Some Other Very Long Metadata Provider"
+    ]
+  }
+}

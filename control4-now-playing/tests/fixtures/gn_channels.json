@@ -1,0 +1,5 @@
+[
+ {"channel":"4.1","callSign":"WRCDT","affiliateCallSign":"NBC","stationId":"10771","preferredImage":{"uri":"assets/s10771_h3_aa.png"}},
+ {"channel":"7.1","callSign":"WJLADT","affiliateCallSign":"ABC","stationId":"10021","preferredImage":{"uri":"assets/s10021_h3_aa.png"}},
+ {"channel":"9.1","callSign":"WUSADT","affiliateCallSign":"CBS","stationId":"10098"}
+]

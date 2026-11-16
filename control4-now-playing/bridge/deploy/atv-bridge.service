@@ -1,0 +1,32 @@
+# Example systemd unit (Raspberry Pi / Linux box).
+# Install:
+#   sudo useradd --system --create-home --home-dir /var/lib/atv-bridge atvbridge
+#   sudo python3 -m venv /opt/atv-bridge
+#   sudo /opt/atv-bridge/bin/pip install /path/to/bridge     # or -r requirements.txt
+#   sudo -u atvbridge /opt/atv-bridge/bin/python -m atv_bridge pair "Living Room" \
+#        --config-dir /var/lib/atv-bridge
+#   sudo cp atv-bridge.service /etc/systemd/system/ && sudo systemctl enable --now atv-bridge
+# Optional token: put ATV_BRIDGE_TOKEN=... in /etc/atv-bridge.env (chmod 600).
+[Unit]
+Description=Apple TV now-playing bridge for Control4
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=atvbridge
+Group=atvbridge
+EnvironmentFile=-/etc/atv-bridge.env
+Environment=ATV_BRIDGE_CONFIG_DIR=/var/lib/atv-bridge
+ExecStart=/opt/atv-bridge/bin/python -m atv_bridge serve --host 0.0.0.0 --port 8765
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/atv-bridge
+
+[Install]
+WantedBy=multi-user.target

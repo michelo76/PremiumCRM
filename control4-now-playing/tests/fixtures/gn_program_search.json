@@ -1,0 +1,4 @@
+{"hitCount":2,"hits":[
+ {"program":{"tmsId":"MV013948950000","rootId":"13948950","title":"Top Gun: Maverick","releaseYear":2022,"releaseDate":"2022-05-27","entityType":"Movie","subType":"Feature Film","genres":["Action","Drama"],"longDescription":"Maverick trains a detachment of graduates for a special assignment.","topCast":["Tom Cruise","Miles Teller"],"directors":["Joseph Kosinski"],"ratings":[{"body":"Motion Picture Association of America","code":"PG-13"}],"preferredImage":{"uri":"assets/p13948950_v_v8_ab.jpg"}}},
+ {"program":{"tmsId":"MV000000000000","rootId":"9","title":"Top Gun","releaseYear":1986,"entityType":"Movie"}}
+]}

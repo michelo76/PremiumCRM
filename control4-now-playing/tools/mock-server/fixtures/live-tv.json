@@ -1,0 +1,108 @@
+{
+  "schema": 1,
+  "version": 88,
+  "updated_at": 1790000000,
+  "media_key": "c4room|tv|espn|206",
+  "room": {
+    "id": 12,
+    "name": "Family Room"
+  },
+  "source": {
+    "provider": "c4room",
+    "device_name": "DIRECTV Genie",
+    "app_name": "Live TV",
+    "app_id": null,
+    "app_icon_url": null
+  },
+  "playback": {
+    "state": "playing",
+    "position_s": null,
+    "duration_s": null,
+    "position_updated_at": 1790000000,
+    "is_live": true,
+    "volume": null
+  },
+  "media": {
+    "kind": "live_tv",
+    "title": "NFL Monday Night Football",
+    "subtitle": "Buffalo Bills at Kansas City Chiefs",
+    "series_title": null,
+    "season": null,
+    "episode": null,
+    "episode_title": null,
+    "artist": null,
+    "album": null,
+    "album_artist": null,
+    "track_number": null,
+    "channel_name": "ESPN",
+    "channel_number": "206",
+    "year": null,
+    "genres": [
+      "Sports",
+      "Football"
+    ],
+    "artwork_url": null
+  },
+  "details": {
+    "matched": true,
+    "confidence": 0.8,
+    "tagline": null,
+    "overview": "The Bills and Chiefs renew one of the AFC’s fiercest modern rivalries under the lights at Arrowhead Stadium, with first place in the conference on the line.",
+    "release_date": null,
+    "year": null,
+    "runtime_min": 210,
+    "content_rating": "TV-G",
+    "genres": [
+      "Sports",
+      "Football"
+    ],
+    "status": null,
+    "poster_url": null,
+    "backdrop_url": null,
+    "logo_url": null,
+    "ratings": null,
+    "cast": [],
+    "crew": null,
+    "networks": [
+      "ESPN"
+    ],
+    "studios": [],
+    "trailer_url": null,
+    "episode": null,
+    "series": null,
+    "music": null,
+    "live": {
+      "program_title": "NFL Monday Night Football",
+      "program_start": 1789995300,
+      "program_end": 1790007900,
+      "next": {
+        "title": "SportsCenter with Scott Van Pelt",
+        "start": 1790007900
+      }
+    },
+    "facts": [
+      {
+        "label": "Venue",
+        "value": "GEHA Field at Arrowhead Stadium"
+      },
+      {
+        "label": "Broadcast",
+        "value": "Joe Buck, Troy Aikman"
+      },
+      {
+        "label": "Format",
+        "value": "1080i HD"
+      }
+    ],
+    "ids": {
+      "imdb": null,
+      "tmdb": null,
+      "musicbrainz": null,
+      "tms": "EP000031230512"
+    },
+    "links": {},
+    "attribution": [
+      "Gracenote"
+    ]
+  }
+}

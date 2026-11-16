@@ -1,0 +1,161 @@
+{
+  "schema": 1,
+  "version": 9,
+  "updated_at": 1790000000,
+  "media_key": "c4room|spotify|fleetwood mac|dreams|local",
+  "room": {
+    "id": 12,
+    "name": "Family Room"
+  },
+  "source": {
+    "provider": "c4room",
+    "device_name": "Family Room Audio",
+    "app_name": "Spotify",
+    "app_id": null,
+    "app_icon_url": null
+  },
+  "playback": {
+    "state": "playing",
+    "position_s": 97,
+    "duration_s": 254,
+    "position_updated_at": 1790000000,
+    "is_live": false,
+    "volume": 45
+  },
+  "media": {
+    "kind": "music",
+    "title": "Dreams",
+    "subtitle": null,
+    "series_title": null,
+    "season": null,
+    "episode": null,
+    "episode_title": null,
+    "artist": "Fleetwood Mac",
+    "album": "Rumours",
+    "album_artist": "Fleetwood Mac",
+    "track_number": 2,
+    "channel_name": null,
+    "channel_number": null,
+    "year": 1977,
+    "genres": [
+      "Soft Rock"
+    ],
+    "artwork_url": "/_mock/img/600x600/rumours.svg"
+  },
+  "details": {
+    "matched": true,
+    "confidence": 0.91,
+    "tagline": null,
+    "overview": null,
+    "release_date": "1977-02-04",
+    "year": 1977,
+    "runtime_min": null,
+    "content_rating": null,
+    "genres": [
+      "Soft Rock",
+      "Pop Rock"
+    ],
+    "status": null,
+    "poster_url": null,
+    "backdrop_url": null,
+    "logo_url": null,
+    "ratings": null,
+    "cast": [],
+    "crew": null,
+    "networks": [],
+    "studios": [],
+    "trailer_url": null,
+    "episode": null,
+    "series": null,
+    "live": null,
+    "music": {
+      "artist_bio": "Fleetwood Mac are a British-American rock band formed in London in 1967. After a blues-rock beginning led by guitarist Peter Green, the band’s 1975 line-up with Lindsey Buckingham and Stevie Nicks transformed them into one of the best-selling acts in history. Rumours, recorded amid the dissolution of two relationships within the band, spent 31 weeks at No. 1 on the Billboard 200 and won the Grammy for Album of the Year.",
+      "artist_image_url": "/_mock/img/800x450/fmac.svg",
+      "album_year": 1977,
+      "label": "Warner Bros.",
+      "album_tracks": [
+        {
+          "n": 1,
+          "title": "Second Hand News",
+          "duration_s": 163
+        },
+        {
+          "n": 2,
+          "title": "Dreams",
+          "duration_s": 254
+        },
+        {
+          "n": 3,
+          "title": "Never Going Back Again",
+          "duration_s": 122
+        },
+        {
+          "n": 4,
+          "title": "Don’t Stop",
+          "duration_s": 191
+        },
+        {
+          "n": 5,
+          "title": "Go Your Own Way",
+          "duration_s": 218
+        },
+        {
+          "n": 6,
+          "title": "Songbird",
+          "duration_s": 200
+        },
+        {
+          "n": 7,
+          "title": "The Chain",
+          "duration_s": 268
+        },
+        {
+          "n": 8,
+          "title": "You Make Loving Fun",
+          "duration_s": 211
+        },
+        {
+          "n": 9,
+          "title": "I Don’t Want to Know",
+          "duration_s": 191
+        },
+        {
+          "n": 10,
+          "title": "Oh Daddy",
+          "duration_s": 234
+        },
+        {
+          "n": 11,
+          "title": "Gold Dust Woman",
+          "duration_s": 291
+        }
+      ],
+      "track_genre": "Soft rock"
+    },
+    "facts": [
+      {
+        "label": "Producers",
+        "value": "Fleetwood Mac, Ken Caillat, Richard Dashut"
+      },
+      {
+        "label": "Recorded",
+        "value": "Feb 1976 – Aug 1976"
+      },
+      {
+        "label": "Certified",
+        "value": "20× Platinum (US)"
+      }
+    ],
+    "ids": {
+      "imdb": null,
+      "tmdb": null,
+      "musicbrainz": "2d2e2fd6-ba0f-3d1b-9cd9-d2f0f3f4c3b1",
+      "tms": null
+    },
+    "links": {},
+    "attribution": [
+      "MusicBrainz",
+      "TheAudioDB"
+    ]
+  }
+}

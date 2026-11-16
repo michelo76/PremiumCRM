@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Now Playing Info: default (idle) mark. Rounded square, four equalizer bars, info dot. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2a31"/>
+      <stop offset="1" stop-color="#121216"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <rect x="16.5" y="16.5" width="479" height="479" rx="111.5" fill="none" stroke="#f3efe6" stroke-opacity="0.14" stroke-width="3"/>
+  <g fill="#f3efe6" fill-opacity="0.86">
+    <rect x="110" y="270" width="52" height="126" rx="26"/>
+    <rect x="190" y="190" width="52" height="206" rx="26"/>
+    <rect x="270" y="236" width="52" height="160" rx="26"/>
+  </g>
+  <circle cx="376" cy="150" r="30" fill="#f3efe6" fill-opacity="0.86"/>
+  <rect x="350" y="214" width="52" height="182" rx="26" fill="#f3efe6" fill-opacity="0.86"/>
+</svg>

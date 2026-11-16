@@ -1,0 +1,13 @@
+{
+  "entity_id": "media_player.living_room_roku",
+  "state": "playing",
+  "attributes": {
+    "media_content_type": "movie",
+    "media_title": "Top Gun: Maverick",
+    "app_name": "Paramount+",
+    "media_duration": 7860,
+    "media_position": 120,
+    "media_position_updated_at": "2026-09-21T14:13:00Z",
+    "friendly_name": "Living Room Roku"
+  }
+}

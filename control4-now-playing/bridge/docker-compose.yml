@@ -1,0 +1,23 @@
+# Example. First pair (interactive), then start the service:
+#   docker compose run --rm atv-bridge scan
+#   docker compose run --rm atv-bridge pair "Living Room"
+#   docker compose up -d
+services:
+  atv-bridge:
+    build: .
+    image: atv-bridge:1.0.0
+    container_name: atv-bridge
+    restart: unless-stopped
+    network_mode: host          # required for mDNS discovery; port 8765 is on the host
+    stdin_open: true            # lets `docker compose run ... pair` read the PIN
+    tty: true
+    environment:
+      ATV_BRIDGE_PORT: "8765"
+      ATV_BRIDGE_LOG_LEVEL: INFO
+      # ATV_BRIDGE_TOKEN: change-me            # optional shared secret
+      # ATV_BRIDGE_SCAN_HOSTS: 192.168.1.20    # unicast scan if multicast is filtered
+    volumes:
+      - atv-bridge-data:/data   # pyatv.json with pairing credentials
+
+volumes:
+  atv-bridge-data:

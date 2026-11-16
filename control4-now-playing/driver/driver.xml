@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<devicedata>
+  <copyright>Copyright 2026 Now Playing Info contributors. MIT License.</copyright>
+  <creator>Now Playing Info</creator>
+  <manufacturer>Now Playing Info</manufacturer>
+  <name>Now Playing Info</name>
+  <model>Now Playing Info</model>
+  <created>11/11/2026 12:00</created>
+  <modified>11/11/2026 12:00</modified>
+  <version>10000</version>
+  <control>lua_gen</control>
+  <controlmethod>IP</controlmethod>
+  <driver>DriverWorks</driver>
+  <combo>true</combo>
+  <minimum_os_version>3.1.3</minimum_os_version>
+  <small image_source="c4z">icons/device_sm.png</small>
+  <large image_source="c4z">icons/device_lg.png</large>
+  <proxies qty="1">
+    <proxy proxybindingid="5001" name="Now Playing" image_source="c4z" small_image="icons/device_sm.png" large_image="icons/device_lg.png">uibutton</proxy>
+  </proxies>
+  <capabilities>
+    <web_view_url proxybindingid="5001">controller://driver/now_playing_info/index.html</web_view_url>
+    <mobile_web_view_enabled>true</mobile_web_view_enabled>
+    <navigator_display_option proxybindingid="5001">
+      <display_icons>
+        <Icon width="70" height="70">controller://driver/now_playing_info/icons/np_70.png</Icon>
+        <Icon width="90" height="90">controller://driver/now_playing_info/icons/np_90.png</Icon>
+        <Icon width="300" height="300">controller://driver/now_playing_info/icons/np_300.png</Icon>
+        <Icon width="512" height="512">controller://driver/now_playing_info/icons/np_512.png</Icon>
+        <Icon width="1024" height="1024">controller://driver/now_playing_info/icons/np_1024.png</Icon>
+        <state id="playing">
+          <Icon width="70" height="70">controller://driver/now_playing_info/icons/np_playing_70.png</Icon>
+          <Icon width="90" height="90">controller://driver/now_playing_info/icons/np_playing_90.png</Icon>
+          <Icon width="300" height="300">controller://driver/now_playing_info/icons/np_playing_300.png</Icon>
+          <Icon width="512" height="512">controller://driver/now_playing_info/icons/np_playing_512.png</Icon>
+          <Icon width="1024" height="1024">controller://driver/now_playing_info/icons/np_playing_1024.png</Icon>
+        </state>
+      </display_icons>
+    </navigator_display_option>
+  </capabilities>
+  <events>
+    <event><id>1</id><name>Media Changed</name><description>When NAME media changes</description><sort_order>1</sort_order></event>
+    <event><id>2</id><name>Playback Started</name><description>When NAME playback starts</description><sort_order>2</sort_order></event>
+    <event><id>3</id><name>Playback Paused</name><description>When NAME playback is paused</description><sort_order>3</sort_order></event>
+    <event><id>4</id><name>Playback Stopped</name><description>When NAME playback stops (stopped, idle or off after playing or paused)</description><sort_order>4</sort_order></event>
+    <event><id>5</id><name>Playback Resumed</name><description>When NAME paused media resumes playing</description><sort_order>5</sort_order></event>
+    <event><id>6</id><name>Details Available</name><description>When NAME metadata details (ratings, cast, overview) become available</description><sort_order>6</sort_order></event>
+    <event><id>7</id><name>Source Changed</name><description>When NAME active source device changes</description><sort_order>7</sort_order></event>
+    <event><id>8</id><name>App Changed</name><description>When NAME active app changes</description><sort_order>8</sort_order></event>
+    <event><id>9</id><name>Movie Started</name><description>When a movie starts playing in NAME</description><sort_order>9</sort_order></event>
+    <event><id>10</id><name>TV Episode Started</name><description>When a TV episode starts playing in NAME</description><sort_order>10</sort_order></event>
+    <event><id>11</id><name>Music Track Started</name><description>When a music track starts playing in NAME</description><sort_order>11</sort_order></event>
+    <event><id>12</id><name>Live TV Started</name><description>When live TV starts playing in NAME</description><sort_order>12</sort_order></event>
+  </events>
+  <connections>
+    <connection>
+      <id>5001</id>
+      <facing>6</facing>
+      <connectionname>UIBUTTON</connectionname>
+      <type>2</type>
+      <consumer>False</consumer>
+      <audiosource>False</audiosource>
+      <videosource>False</videosource>
+      <linelevel>False</linelevel>
+      <classes>
+        <class>
+          <classname>UIBUTTON</classname>
+        </class>
+      </classes>
+    </connection>
+  </connections>
+  <config>
+    <script file="driver.lua" jit="1"/>
+    <documentation file="www/documentation.html"/>
+    <properties>
+      <property><name>Status Info</name><type>LABEL</type><default>Status</default></property>
+      <property><name>Driver Version</name><type>STRING</type><default></default><readonly>true</readonly></property>
+      <property><name>Status</name><type>STRING</type><default>Starting</default><readonly>true</readonly></property>
+      <property><name>Active Source</name><type>STRING</type><default>None</default><readonly>true</readonly></property>
+      <property><name>Metadata Sources</name><type>STRING</type><default>None</default><readonly>true</readonly></property>
+      <property><name>Web View URL</name><type>STRING</type><default></default><readonly>true</readonly></property>
+      <property><name>LAN URL</name><type>STRING</type><default>Disabled</default><readonly>true</readonly></property>
+
+      <property><name>Room Settings</name><type>LABEL</type><default>Room</default></property>
+      <property>
+        <name>Room</name>
+        <type>DEVICE_SELECTOR</type>
+        <items><item>roomdevice.c4i</item></items>
+        <multiselect>false</multiselect>
+        <default></default>
+        <readonly>false</readonly>
+      </property>
+      <property>
+        <name>Use Control4 Room Media</name>
+        <type>LIST</type>
+        <items><item>On</item><item>Off</item></items>
+        <default>On</default>
+        <readonly>false</readonly>
+      </property>
+      <property>
+        <name>Show Only When Room Is On</name>
+        <type>LIST</type>
+        <items><item>Off</item><item>On</item></items>
+        <default>Off</default>
+        <readonly>false</readonly>
+      </property>
+
+      <property><name>Roku Settings</name><type>LABEL</type><default>Roku</default></property>
+      <property><name>Roku Address</name><type>STRING</type><default></default><readonly>false</readonly></property>
+      <property><name>Roku Name</name><type>STRING</type><default></default><readonly>false</readonly></property>
+
+      <property><name>Apple TV Settings</name><type>LABEL</type><default>Apple TV (companion bridge)</default></property>
+      <property><name>Apple TV Bridge URL</name><type>STRING</type><default></default><readonly>false</readonly></property>
+      <property><name>Apple TV Device</name><type>STRING</type><default></default><readonly>false</readonly></property>
+      <property><name>Apple TV Bridge Token</name><type>STRING</type><default></default><password>true</password><readonly>false</readonly></property>
+
+      <property><name>Home Assistant Settings</name><type>LABEL</type><default>Home Assistant</default></property>
+      <property><name>Home Assistant URL</name><type>STRING</type><default></default><readonly>false</readonly></property>
+      <property><name>Home Assistant Token</name><type>STRING</type><default></default><password>true</password><readonly>false</readonly></property>
+      <property><name>Home Assistant Entity ID</name><type>STRING</type><default></default><readonly>false</readonly></property>
+      <property>
+        <name>Home Assistant Entity Is</name>
+        <type>LIST</type>
+        <items><item>Separate Device</item><item>Same Device As Roku</item><item>Same Device As Apple TV</item></items>
+        <default>Separate Device</default>
+        <readonly>false</readonly>
+      </property>
+
+      <property><name>Metadata Settings</name><type>LABEL</type><default>Metadata</default></property>
+      <property><name>TMDB API Key</name><type>STRING</type><default></default><password>true</password><readonly>false</readonly></property>
+      <property><name>OMDb API Key</name><type>STRING</type><default></default><password>true</password><readonly>false</readonly></property>
+      <property><name>Gracenote API Key</name><type>STRING</type><default></default><password>true</password><readonly>false</readonly></property>
+      <property><name>Gracenote Lineup ID</name><type>STRING</type><default></default><readonly>false</readonly></property>
+      <property>
+        <name>Music Lookup</name>
+        <type>LIST</type>
+        <items><item>On</item><item>Off</item></items>
+        <default>On</default>
+        <readonly>false</readonly>
+      </property>
+      <property><name>Metadata Language</name><type>STRING</type><default>en-US</default><readonly>false</readonly></property>
+      <property><name>Content Rating Country</name><type>STRING</type><default>US</default><readonly>false</readonly></property>
+
+      <property><name>Advanced Settings</name><type>LABEL</type><default>Advanced</default></property>
+      <property>
+        <name>Poll Interval Playing</name>
+        <type>RANGED_INTEGER</type>
+        <minimum>1</minimum>
+        <maximum>30</maximum>
+        <default>2</default>
+        <readonly>false</readonly>
+      </property>
+      <property>
+        <name>Poll Interval Idle</name>
+        <type>RANGED_INTEGER</type>
+        <minimum>2</minimum>
+        <maximum>120</maximum>
+        <default>5</default>
+        <readonly>false</readonly>
+      </property>
+      <property>
+        <name>Embed LAN Artwork</name>
+        <type>LIST</type>
+        <items><item>On</item><item>Off</item></items>
+        <default>On</default>
+        <readonly>false</readonly>
+      </property>
+      <property>
+        <name>LAN Web Port</name>
+        <type>RANGED_INTEGER</type>
+        <minimum>0</minimum>
+        <maximum>65535</maximum>
+        <default>0</default>
+        <readonly>false</readonly>
+      </property>
+      <property>
+        <name>Debug Mode</name>
+        <type>LIST</type>
+        <items><item>Off</item><item>Print</item><item>Log</item><item>Print and Log</item></items>
+        <default>Off</default>
+        <readonly>false</readonly>
+      </property>
+    </properties>
+    <actions>
+      <action><name>Refresh Now</name><command>RefreshNow</command></action>
+      <action><name>Clear Metadata Cache</name><command>ClearMetadataCache</command></action>
+      <action><name>Print State</name><command>PrintState</command></action>
+      <action><name>Print Room Media Info</name><command>PrintRoomMediaInfo</command></action>
+      <action><name>Test Metadata Sources</name><command>TestMetadataSources</command></action>
+    </actions>
+    <commands>
+      <command>
+        <name>Refresh</name>
+        <description>Refresh NAME now</description>
+      </command>
+    </commands>
+  </config>
+</devicedata>

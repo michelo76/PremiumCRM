@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "atv-bridge"
+version = "1.0.0"
+description = "Apple TV now-playing bridge (pyatv -> JSON over HTTP) for Control4"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pyatv>=0.18.0,<0.19",
+    "aiohttp>=3.9,<4",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-aiohttp>=1.0.5"]
+
+[project.scripts]
+atv-bridge = "atv_bridge.cli:main"
+
+[tool.setuptools]
+packages = ["atv_bridge"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["."]

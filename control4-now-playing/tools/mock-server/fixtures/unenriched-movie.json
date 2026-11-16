@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "version": 3,
+  "updated_at": 1790000000,
+  "media_key": "roku|netflix|oppenheimer",
+  "room": {
+    "id": 12,
+    "name": "Family Room"
+  },
+  "source": {
+    "provider": "roku",
+    "device_name": "Living Room Roku",
+    "app_name": "Netflix",
+    "app_id": "12",
+    "app_icon_url": null
+  },
+  "playback": {
+    "state": "playing",
+    "position_s": 2210,
+    "duration_s": 10860,
+    "position_updated_at": 1790000000,
+    "is_live": false,
+    "volume": null
+  },
+  "media": {
+    "kind": "movie",
+    "title": "Oppenheimer",
+    "subtitle": null,
+    "series_title": null,
+    "season": null,
+    "episode": null,
+    "episode_title": null,
+    "artist": null,
+    "album": null,
+    "album_artist": null,
+    "track_number": null,
+    "channel_name": null,
+    "channel_number": null,
+    "year": 2023,
+    "genres": [],
+    "artwork_url": null
+  },
+  "details": null
+}

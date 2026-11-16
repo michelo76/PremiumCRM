@@ -1,0 +1,216 @@
+{
+ "episode": {
+  "media": {
+   "album": null,
+   "album_artist": null,
+   "artist": null,
+   "artwork_url": "http://192.168.1.10:8765/v1/devices/AA%3ABB/artwork?v=0123456789abcdef",
+   "channel_name": null,
+   "channel_number": null,
+   "episode": 7,
+   "episode_title": "Forks",
+   "genres": [],
+   "kind": "episode",
+   "season": 2,
+   "series_title": "The Bear",
+   "subtitle": "The Bear \u00b7 S2E7",
+   "title": "Forks",
+   "track_number": null,
+   "year": null
+  },
+  "playback": {
+   "duration_s": 2460.0,
+   "is_live": false,
+   "position_s": 600.0,
+   "position_updated_at": 1790000000,
+   "state": "paused",
+   "volume": 37.5
+  },
+  "source": {
+   "app_icon_url": null,
+   "app_id": "com.apple.TVWatchList",
+   "app_name": "TV",
+   "device_name": "Den Apple TV",
+   "provider": "appletv"
+  }
+ },
+ "idle": {
+  "media": {
+   "album": null,
+   "album_artist": null,
+   "artist": null,
+   "artwork_url": null,
+   "channel_name": null,
+   "channel_number": null,
+   "episode": null,
+   "episode_title": null,
+   "genres": [],
+   "kind": "unknown",
+   "season": null,
+   "series_title": null,
+   "subtitle": null,
+   "title": null,
+   "track_number": null,
+   "year": null
+  },
+  "playback": {
+   "duration_s": null,
+   "is_live": null,
+   "position_s": null,
+   "position_updated_at": null,
+   "state": "idle",
+   "volume": 37.5
+  },
+  "source": {
+   "app_icon_url": null,
+   "app_id": "com.apple.TVWatchList",
+   "app_name": "TV",
+   "device_name": "Den Apple TV",
+   "provider": "appletv"
+  }
+ },
+ "live": {
+  "media": {
+   "album": null,
+   "album_artist": null,
+   "artist": null,
+   "artwork_url": null,
+   "channel_name": null,
+   "channel_number": null,
+   "episode": null,
+   "episode_title": null,
+   "genres": [],
+   "kind": "live_tv",
+   "season": null,
+   "series_title": null,
+   "subtitle": null,
+   "title": "Evening News",
+   "track_number": null,
+   "year": null
+  },
+  "playback": {
+   "duration_s": null,
+   "is_live": true,
+   "position_s": 0.0,
+   "position_updated_at": 1790000000,
+   "state": "playing",
+   "volume": 37.5
+  },
+  "source": {
+   "app_icon_url": null,
+   "app_id": "com.apple.TVWatchList",
+   "app_name": "TV",
+   "device_name": "Den Apple TV",
+   "provider": "appletv"
+  }
+ },
+ "movie": {
+  "media": {
+   "album": null,
+   "album_artist": null,
+   "artist": null,
+   "artwork_url": "http://192.168.1.10:8765/v1/devices/AA%3ABB/artwork?v=0123456789abcdef",
+   "channel_name": null,
+   "channel_number": null,
+   "episode": null,
+   "episode_title": null,
+   "genres": [
+    "Science Fiction"
+   ],
+   "kind": "movie",
+   "season": null,
+   "series_title": null,
+   "subtitle": null,
+   "title": "Dune: Part Two",
+   "track_number": null,
+   "year": null
+  },
+  "playback": {
+   "duration_s": 9960.0,
+   "is_live": false,
+   "position_s": 1234.5,
+   "position_updated_at": 1790000000,
+   "state": "playing",
+   "volume": 37.5
+  },
+  "source": {
+   "app_icon_url": null,
+   "app_id": "com.apple.TVWatchList",
+   "app_name": "TV",
+   "device_name": "Den Apple TV",
+   "provider": "appletv"
+  }
+ },
+ "music": {
+  "media": {
+   "album": "Rumours",
+   "album_artist": null,
+   "artist": "Fleetwood Mac",
+   "artwork_url": "http://192.168.1.10:8765/v1/devices/AA%3ABB/artwork?v=0123456789abcdef",
+   "channel_name": null,
+   "channel_number": null,
+   "episode": null,
+   "episode_title": null,
+   "genres": [
+    "Rock"
+   ],
+   "kind": "music",
+   "season": null,
+   "series_title": null,
+   "subtitle": "Fleetwood Mac",
+   "title": "Dreams",
+   "track_number": null,
+   "year": null
+  },
+  "playback": {
+   "duration_s": 257.0,
+   "is_live": false,
+   "position_s": 42.0,
+   "position_updated_at": 1790000000,
+   "state": "playing",
+   "volume": 37.5
+  },
+  "source": {
+   "app_icon_url": null,
+   "app_id": "com.apple.TVMusic",
+   "app_name": "Music",
+   "device_name": "Den Apple TV",
+   "provider": "appletv"
+  }
+ },
+ "off": {
+  "media": {
+   "album": null,
+   "album_artist": null,
+   "artist": null,
+   "artwork_url": null,
+   "channel_name": null,
+   "channel_number": null,
+   "episode": null,
+   "episode_title": null,
+   "genres": [],
+   "kind": "unknown",
+   "season": null,
+   "series_title": null,
+   "subtitle": null,
+   "title": null,
+   "track_number": null,
+   "year": null
+  },
+  "playback": {
+   "duration_s": null,
+   "is_live": null,
+   "position_s": null,
+   "position_updated_at": null,
+   "state": "off",
+   "volume": null
+  },
+  "source": {
+   "app_icon_url": null,
+   "app_id": null,
+   "app_name": null,
+   "device_name": "Den Apple TV",
+   "provider": "appletv"
+  }
+ }
+}
