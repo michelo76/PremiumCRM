@@ -342,4 +342,109 @@ describe("np.engine", function()
     T.eq(vars.DISPLAY_LINE_2, "Netflix on Living Room Roku")
     T.eq(vars.CONTENT_RATING, "PG-13"); T.eq(vars.IMDB_ID, "tt1745960")
   end)
+
+  -------------------------------------------------------------------------
+  -- live TV: the channel (media_key) stays the same while programs change
+  -------------------------------------------------------------------------
+  local T0 = 1790000000 -- fixture airings: ABC World News T0-800 .. T0+1000, then Jeopardy! .. T0+2800
+  local function live_dev()
+    return device(fd, "roku", { is_live = true, app = "Live TV",
+      media = { kind = "live_tv", channel_number = "7.1", channel_name = "WJLA-HD" } })
+  end
+  local function live_engine(devs)
+    fd:route("/lineups/USA-OTA22201-DEFAULT/channels", { status = 200, body = T.fixture("gn_channels.json") })
+    fd:route("/stations/10021/airings", { status = 200, body = T.fixture("gn_airings.json") })
+    return make(fd, devs, { enrich = { gracenote = { api_key = "GN", lineup_id = "USA-OTA22201-DEFAULT" },
+      music = { enabled = false } } })
+  end
+  local function title_of(e) local d = e:get_state().details; return d and d.live and d.live.program_title end
+
+  it("live TV: re-enriches when the current program ends (same media_key)", function()
+    local d = live_dev()
+    local e, events = live_engine({ d })
+    e:start(); fd:advance(3)
+    T.eq(title_of(e), "ABC World News Tonight With David Muir")
+    T.eq(e:get_state().details.live.program_end, T0 + 1000)
+    T.eq(fd:count("/airings"), 1)
+    local key, v = e:get_state().media_key, e:get_state().version
+    fd:advance(T0 + 999 - fd.t)
+    T.eq(fd:count("/airings"), 1, "no lookup before the boundary")
+    T.eq(e:get_state().version, v)
+    fd:advance(15) -- program ended at T0+1000; refresh shortly after
+    T.eq(fd:count("/airings"), 2, "one lookup after the program ended")
+    local s = e:get_state()
+    T.eq(s.media_key, key, "same channel, same media_key")
+    T.eq(title_of(e), "Jeopardy!")
+    T.eq(s.details.live.program_end, T0 + 2800)
+    T.eq(s.version, v + 1); T.ok(events[#events].changes.details)
+    -- and the next boundary is scheduled from the new program
+    fd:advance(T0 + 2800 + 15 - fd.t)
+    T.eq(fd:count("/airings"), 3)
+  end)
+
+  it("live TV: an API that keeps returning no current program does not cause a lookup storm", function()
+    local d = live_dev()
+    local e = live_engine({ d })
+    e:start(); fd:advance(3)
+    T.eq(title_of(e), "ABC World News Tonight With David Muir")
+    -- from now on the API only knows airings that have already ended (stale schedule)
+    local stale = T.fixture("gn_airings.json")
+    fd:route("/stations/10021/airings", { status = 200, body = '[' .. stale:match('^%s*%[%s*(%b{})') .. ']' })
+    fd:advance(T0 + 1000 + 3600 - fd.t) -- one hour past the boundary
+    local n = fd:count("/airings") - 1 -- expected: +5 s, then +120, +240, +480, +900, +900, +900
+    T.eq(n, 7, "retried with backoff, not hot-looping")
+    -- the ended program is not shown as current: rolled over to the announced next program
+    T.eq(title_of(e), "Jeopardy!")
+    T.is_nil(e:get_state().details.overview, "no stale description of the old program")
+    T.ok(fd:pending_timers() <= 2, "one poll timer + one live retry timer at most")
+  end)
+
+  it("live TV: the refresh timer is cancelled on channel change and on stop (no leak)", function()
+    local d = live_dev()
+    local e = live_engine({ d })
+    e:start(); fd:advance(3)
+    local base = fd:pending_timers() -- poll timer + live refresh timer
+    T.eq(base, 2)
+    d:set({ media = { kind = "live_tv", channel_number = "9.1", channel_name = "WUSA" } }) -- no airings route: 404
+    fd:advance(10)
+    T.eq(fd:pending_timers(), 1, "old program timer cancelled, none added for an unenriched channel")
+    fd:advance(T0 + 1100 - fd.t)
+    T.eq(fd:count("/stations/10021/airings"), 1, "no refresh for the channel we left")
+    d:set({ media = { kind = "live_tv", channel_number = "7.1", channel_name = "WJLA-HD" } })
+    fd:advance(4)
+    T.eq(title_of(e), "Jeopardy!", "back on 7.1: the ended cached program is not served")
+    T.eq(fd:count("/stations/10021/airings"), 2)
+    e:stop()
+    T.eq(fd:pending_timers(), 0, "stop cancels the live refresh timer")
+    fd:advance(4000)
+    T.eq(fd:count("/stations/10021/airings"), 2)
+  end)
+
+  it("non-Latin titles: two different Japanese titles on the same app are different media", function()
+    local d = device(fd, "roku", { title = "千と千尋の神隠し" })
+    local e, events = make(fd, { d }, { enrich = { music = { enabled = false } } })
+    e:start(); fd:flush()
+    local k1 = e:get_state().media_key
+    T.eq(k1, "roku|12||千と千尋の神隠し||||")
+    local n = #events
+    d:set({ title = "もののけ姫" })
+    fd:advance(2)
+    local k2 = e:get_state().media_key
+    T.ok(k1 ~= k2, "different media_key")
+    T.eq(#events, n + 1); T.ok(events[#events].changes.media, "media change fired")
+    T.eq(e:get_state().media.title, "もののけ姫")
+  end)
+
+  it("a title that normalizes to nothing (emoji-only) still gets its own identity", function()
+    local d = device(fd, "roku", { title = "🎬🍿" })
+    local e, events = make(fd, { d }, { enrich = { music = { enabled = false } } })
+    e:start(); fd:flush()
+    local k1 = e:get_state().media_key
+    d:set({ title = "🎵🎶" })
+    fd:advance(2)
+    T.ok(k1 ~= e:get_state().media_key, "emoji-only titles do not collapse to one key")
+    T.ok(events[#events].changes.media)
+    T.ok(k1 ~= Engine.media_key(pbm.normalize({ source = { provider = "roku", app_id = "12" },
+      playback = { state = "playing" }, media = { kind = "movie" } }, 0)), "differs from an untitled item")
+  end)
 end)

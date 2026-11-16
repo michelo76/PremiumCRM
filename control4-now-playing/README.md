@@ -93,7 +93,11 @@ HTTP transport and a fake `window.C4` (DataToUI wrapper and STATE_JSON variable)
 browser clock 120 s off the controller's (proves `sent_at` skew correction), and asserts no
 console/page errors, title, S·E line, rating chips, cast count, progress, attribution,
 LAN artwork via GET_ARTWORK (never loaded directly in Navigator mode), the reconnecting pill
-not covering the top bar, the next section peeking above the fold, and kiosk mode.
+not covering the top bar, the next section peeking above the fold, and kiosk mode. The Apple TV
+movie is also replayed on an open page as the engine publishes it (unenriched, then enriched
+under the same `media_key`, then an update with unchanged image URLs) in both transports: the
+artwork and backdrop must switch to the TMDB images, and the unchanged update must keep the
+same `<img>` node.
 Screenshots (1280×800, 1920×1080, 390×844) go to `build/e2e/shots`. `tests/e2e/mock_c4.js`
 checks GET_ARTWORK through the mock server's fake Navigator.
 

@@ -129,7 +129,7 @@ local SCENARIOS = {
       m:route("/stations/10021/airings", { status = 200, body = fixture("gn_airings.json") })
     end },
   { name = "movie", desc = "Apple TV bridge movie (LAN artwork with ?token=), TMDB + OMDb",
-    props = with(BRIDGE, KEYS),
+    props = with(BRIDGE, KEYS), pre_s = 1, -- also capture the state published BEFORE enrichment (same media_key)
     setup = function(m)
       local d = json.decode(fixture("bridge_appletv.json"))
       d.media.artwork_url = "http://192.168.1.10:8765/v1/devices/Den/artwork?v=abc&token=bridge-secret-t0k3n"
@@ -170,7 +170,14 @@ for _, sc in ipairs(SCENARIOS) do
   local m = new(sc.props)
   sc.setup(m)
   m:start()
-  m:advance(8) -- first poll, 1.5 s enrichment debounce, metadata requests, re-polls
+  local pre
+  if sc.pre_s then
+    -- <name>.pre.json: what an open page receives first when this media starts (details not yet
+    -- attached, same media_key as the final state) -- render.js replays pre -> final.
+    m:advance(sc.pre_s)
+    pre = assert(m.vars.STATE_JSON, sc.name .. ": no state before enrichment")
+  end
+  m:advance(8 - (sc.pre_s or 0)) -- first poll, 1.5 s enrichment debounce, metadata requests, re-polls
   assert(#m.errors == 0, sc.name .. ": driver errors:\n" .. table.concat(m.errors, "\n"))
   local sj = m.vars.STATE_JSON
   local st = assert(json.decode(sj), sc.name .. ": STATE_JSON is not JSON")
@@ -184,6 +191,12 @@ for _, sc in ipairs(SCENARIOS) do
     end
   end
   write(OUT .. "/" .. sc.name .. ".json", sj)
+  if pre then
+    local ps = json.decode(pre)
+    assert(ps.details == nil and ps.media_key == st.media_key and st.details ~= nil,
+      sc.name .. ": pre state must be the unenriched state of the same media_key")
+    write(OUT .. "/" .. sc.name .. ".pre.json", pre)
+  end
   write(OUT .. "/" .. sc.name .. ".dtu.json", json.encode({ cmd = dtu.cmd, params = { state = dtu.params.state } }))
   write(OUT .. "/" .. sc.name .. ".vars.json", json.encode(m.vars))
   -- What a Navigator page asks for: every LAN image of the state, sent exactly as the page
@@ -208,7 +221,7 @@ for _, sc in ipairs(SCENARIOS) do
   assert(#replies == #lan, sc.name .. ": expected " .. #lan .. " artwork replies, got " .. #replies)
   write(OUT .. "/" .. sc.name .. ".artwork.json", json.encode(replies))
   index.scenarios[#index.scenarios + 1] = { name = sc.name, desc = sc.desc, version = st.version,
-    state = st.playback.state, kind = st.media.kind, bytes = #sj, lan_images = #lan }
+    state = st.playback.state, kind = st.media.kind, bytes = #sj, lan_images = #lan, pre = pre and true or nil }
   io.write(string.format("%-11s v%-3d %-8s %-8s %6d bytes  %s\n", sc.name, st.version, st.playback.state,
     st.media.kind, #sj, sc.desc))
   m:destroy()

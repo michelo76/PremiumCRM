@@ -15,6 +15,8 @@ lookups.
       opts.is_current() -> false aborts between enricher steps (result neither cached nor used).
       cb may be invoked synchronously (cache hit).
   pipeline:peek(media_key) -> details | false (negative entry) | nil (unknown)
+      A cached live-TV entry whose details.live.program_end has passed is expired (evicted, nil).
+  pipeline:invalidate(media_key)   drop the cached entry (forces the next lookup to the APIs)
   pipeline:enabled_names() -> {"TMDB", ...}
   Pipeline.merge(acc, partial) / Pipeline.finalize(acc)  (exposed for tests)
 
@@ -161,9 +163,29 @@ end
 -- lookup
 ---------------------------------------------------------------------------
 
-function Pipeline:peek(key)
-  local v = self.cache:get(key, self.deps.now())
+-- Live TV details describe one airing: once its program_end has passed the entry is stale
+-- whatever its TTL (the channel, and so the media_key, stays the same across programs).
+function M.live_ended(details, now)
+  local lv = type(details) == "table" and details.live
+  local pe = type(lv) == "table" and tonumber(lv.program_end) or nil
+  return pe ~= nil and now >= pe
+end
+
+function Pipeline:_cached(key, now)
+  local v = self.cache:get(key, now)
+  if v and M.live_ended(v, now) then
+    self.cache:delete(key)
+    return nil
+  end
   return v
+end
+
+function Pipeline:peek(key)
+  return self:_cached(key, self.deps.now())
+end
+
+function Pipeline:invalidate(key)
+  self.cache:delete(key)
 end
 
 function Pipeline:_applicable(pb, ctx)
@@ -178,7 +200,7 @@ end
 function Pipeline:lookup(pb, key, cb, opts)
   opts = opts or {}
   local now = self.deps.now()
-  local cached = self.cache:get(key, now)
+  local cached = self:_cached(key, now)
   if cached ~= nil then
     if cached == false then return cb(nil, { cached = true, negative = true }) end
     return cb(cached, { cached = true })

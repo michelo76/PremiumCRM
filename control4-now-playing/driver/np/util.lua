@@ -7,8 +7,9 @@ np.util -- pure helpers shared by every Now Playing module (no C4, no io).
                                     " - Topic", "(Official Video)", "(feat. X)", "- Remastered 2011" ...)
   util.extract_year(s)           -> number | nil
   util.parse_episode(s)          -> {season=, episode=, series=, episode_title=} | nil
-  util.norm(s)                   -> lowercase ascii-folded alnum token string (for keys and matching)
-  util.levenshtein(a, b), util.similarity(a, b) -> 0..1
+  util.norm(s)                   -> lowercase ascii-folded alnum token string (for keys and matching);
+                                    UTF-8 aware: CJK/Cyrillic/Greek... letters kept, emoji/symbols dropped
+  util.levenshtein(a, b) (per code point), util.similarity(a, b) -> 0..1, util.ulen(s) (code points)
   util.xml_parse(s) -> root | nil, err ; util.xml_child(node, tag), util.xml_children(node, tag),
   util.xml_text(node, tag), util.xml_find(node, tag)
   util.deep_equal(a, b), util.copy(t), util.deep_copy(t)
@@ -134,13 +135,89 @@ function M.fold(s)
   return (s:gsub("[\192-\239][\128-\191]+", function(ch) return FOLD[ch] or ch end))
 end
 
--- Lowercased, ascii-folded, punctuation-free, single-spaced token string.
+local function utf8_char(cp)
+  if cp < 0x80 then return string.char(cp) end
+  if cp < 0x800 then return string.char(0xC0 + floor(cp / 64), 0x80 + cp % 64) end
+  if cp < 0x10000 then
+    return string.char(0xE0 + floor(cp / 4096), 0x80 + floor(cp / 64) % 64, 0x80 + cp % 64)
+  end
+  return string.char(0xF0 + floor(cp / 262144), 0x80 + floor(cp / 4096) % 64, 0x80 + floor(cp / 64) % 64, 0x80 + cp % 64)
+end
+
+-- Code point of one UTF-8 sequence (nil when malformed).
+local function utf8_cp(ch)
+  local n, b = #ch, ch:byte(1)
+  if n == 1 then return b < 0x80 and b or nil end
+  if n == 2 and b >= 0xC2 and b < 0xE0 then return (b - 0xC0) * 64 + ch:byte(2) - 0x80 end
+  if n == 3 and b >= 0xE0 and b < 0xF0 then
+    return (b - 0xE0) * 4096 + (ch:byte(2) - 0x80) * 64 + ch:byte(3) - 0x80
+  end
+  if n == 4 and b >= 0xF0 and b < 0xF5 then
+    return (b - 0xF0) * 262144 + (ch:byte(2) - 0x80) * 4096 + (ch:byte(3) - 0x80) * 64 + ch:byte(4) - 0x80
+  end
+  return nil
+end
+
+-- Non-ASCII code points that are NOT word characters for matching: punctuation, symbols, emoji
+-- (-> separator) and invisible / combining marks (-> removed, so "e\u0301" == "e").
+local MB_DROP = {
+  { 0x0300, 0x036F }, { 0x200B, 0x200D }, { 0x2060, 0x2060 }, { 0xFE00, 0xFE0F }, { 0xFEFF, 0xFEFF },
+  { 0xE0000, 0xE007F },
+}
+local MB_SEP = {
+  { 0x0080, 0x00BF }, { 0x00D7, 0x00D7 }, { 0x00F7, 0x00F7 }, -- Latin-1 punctuation / symbols, x, /
+  { 0x2000, 0x2BFF }, { 0x2E00, 0x2E7F },                      -- general punctuation .. misc symbols
+  { 0x3000, 0x3004 }, { 0x3008, 0x3020 }, { 0x3030, 0x3030 }, { 0x30FB, 0x30FB }, -- CJK punctuation, ・
+  { 0xFE10, 0xFE1F }, { 0xFE30, 0xFE6F },                      -- vertical / small forms
+  { 0xFF01, 0xFF0F }, { 0xFF1A, 0xFF20 }, { 0xFF3B, 0xFF40 }, { 0xFF5B, 0xFF65 }, { 0xFFF0, 0xFFFF },
+  { 0x1F000, 0x1FAFF },                                        -- emoji, pictographs, flags
+}
+local function in_ranges(cp, list)
+  for _, r in ipairs(list) do
+    if cp >= r[1] and cp <= r[2] then return true end
+  end
+  return false
+end
+
+-- Simple lower-casing of the common non-ASCII alphabets (Latin-1/Extended-A, Greek, Cyrillic).
+local function mb_lower(cp)
+  if (cp >= 0xC0 and cp <= 0xDE and cp ~= 0xD7) or (cp >= 0x391 and cp <= 0x3AB) or (cp >= 0x410 and cp <= 0x42F) then
+    return cp + 0x20
+  end
+  if cp >= 0x400 and cp <= 0x40F then return cp + 0x50 end
+  if (cp >= 0x100 and cp <= 0x12F) or (cp >= 0x132 and cp <= 0x137) or (cp >= 0x14A and cp <= 0x177) then
+    return cp - cp % 2 + 1
+  end
+  if (cp >= 0x139 and cp <= 0x148) or (cp >= 0x179 and cp <= 0x17E) then return cp % 2 == 1 and cp + 1 or cp end
+  return cp
+end
+
+-- One non-ASCII UTF-8 sequence -> its matching form: a lower-cased letter (kept as a word
+-- character), an ASCII letter/digit (fullwidth forms), " " (punctuation / symbol / malformed)
+-- or "" (combining / invisible).
+local function mb_word(ch)
+  local cp = utf8_cp(ch)
+  if not cp or cp < 0x80 then return " " end
+  if in_ranges(cp, MB_DROP) then return "" end
+  if in_ranges(cp, MB_SEP) then return " " end
+  if (cp >= 0xFF10 and cp <= 0xFF19) or (cp >= 0xFF21 and cp <= 0xFF3A) or (cp >= 0xFF41 and cp <= 0xFF5A) then
+    return string.char(cp - 0xFEE0):lower()
+  end
+  local lc = mb_lower(cp)
+  if lc ~= cp then return utf8_char(lc) end
+  return ch
+end
+
+-- Lowercased, ascii-folded, punctuation-free, single-spaced token string. UTF-8 aware: letters
+-- of other scripts (CJK, Cyrillic, Greek, ...) are word characters; punctuation, symbols and
+-- emoji of any script are separators.
 function M.norm(s)
   if s == nil then return "" end
   s = M.fold(tostring(s)):lower()
   s = s:gsub("&", " and ")
   s = s:gsub("['`]", "")
-  s = s:gsub("[^%w]+", " ")
+  s = s:gsub("[\128-\255][\128-\191]*", mb_word)
+  s = s:gsub("[^%w\128-\255]+", " ")
   return M.trim(s:gsub("%s+", " ")) or ""
 end
 
@@ -300,20 +377,41 @@ end
 -- Fuzzy matching
 ---------------------------------------------------------------------------
 
+-- Characters of s (first 100): bytes for ASCII-only input, UTF-8 sequences otherwise.
+local function chars(s, utf8)
+  local t = {}
+  if utf8 then
+    for ch in s:gmatch("[^\128-\191][\128-\191]*") do
+      t[#t + 1] = ch
+      if #t == 100 then break end
+    end
+  else
+    for i = 1, math.min(#s, 100) do t[i] = s:byte(i) end
+  end
+  return t
+end
+
+-- Number of characters (UTF-8 code points) of s.
+function M.ulen(s)
+  local _, n = s:gsub("[^\128-\191]", "")
+  return n
+end
+
+-- Edit distance in characters (UTF-8 code points), each string capped at 100 characters.
 function M.levenshtein(a, b)
   a, b = a or "", b or ""
-  if #a > 100 then a = a:sub(1, 100) end
-  if #b > 100 then b = b:sub(1, 100) end
-  local la, lb = #a, #b
+  local utf8 = a:find("[\128-\255]") ~= nil or b:find("[\128-\255]") ~= nil
+  local A, B = chars(a, utf8), chars(b, utf8)
+  local la, lb = #A, #B
   if la == 0 then return lb end
   if lb == 0 then return la end
   local prev, cur = {}, {}
   for j = 0, lb do prev[j] = j end
   for i = 1, la do
     cur[0] = i
-    local ca = a:byte(i)
+    local ca = A[i]
     for j = 1, lb do
-      local cost = (ca == b:byte(j)) and 0 or 1
+      local cost = (ca == B[j]) and 0 or 1
       local v = prev[j] + 1
       local ins = cur[j - 1] + 1
       if ins < v then v = ins end
@@ -343,7 +441,7 @@ local function sim_norm(na, nb)
     if (counts[w] or 0) > 0 then common = common + 1; counts[w] = counts[w] - 1 end
   end
   local dice = 2 * common / (#ta + #tb)
-  local maxlen = math.max(#na, #nb)
+  local maxlen = math.max(M.ulen(na), M.ulen(nb))
   local lev = 1 - M.levenshtein(na, nb) / maxlen
   return 0.55 * dice + 0.45 * lev
 end
@@ -363,15 +461,6 @@ end
 ---------------------------------------------------------------------------
 
 local ENTITIES = { amp = "&", lt = "<", gt = ">", quot = '"', apos = "'" }
-
-local function utf8_char(cp)
-  if cp < 0x80 then return string.char(cp) end
-  if cp < 0x800 then return string.char(0xC0 + floor(cp / 64), 0x80 + cp % 64) end
-  if cp < 0x10000 then
-    return string.char(0xE0 + floor(cp / 4096), 0x80 + floor(cp / 64) % 64, 0x80 + cp % 64)
-  end
-  return string.char(0xF0 + floor(cp / 262144), 0x80 + floor(cp / 4096) % 64, 0x80 + floor(cp / 64) % 64, 0x80 + cp % 64)
-end
 
 function M.xml_unescape(s)
   return (s:gsub("&(#?x?)(%w+);", function(kind, v)
