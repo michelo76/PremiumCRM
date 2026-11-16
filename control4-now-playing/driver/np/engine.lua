@@ -59,7 +59,9 @@ details carry live.program_end, the engine looks the channel up again LIVE_REFRE
 after that boundary (cache entry bypassed). A result whose program has already ended (or no
 result) does not replace the published program with stale data: the ended program is rolled
 over to the announced live.next (title only) or dropped, and the lookup is retried no sooner
-than LIVE_REFRESH_MIN_S after the previous one, doubling up to LIVE_REFRESH_MAX_S. The timer
+than LIVE_REFRESH_MIN_S after the previous one, doubling up to LIVE_REFRESH_MAX_S. A result
+without a current program_end (e.g. TMDB matched but Gracenote failed) counts as failed too: its
+non-live details are published with the rolled-over live block and the lookup is retried. The timer
 is cancelled on media change, stop() and enrichment reconfiguration.
 ]]
 
@@ -341,6 +343,18 @@ local function rolled_over(details, now)
   return nil
 end
 
+-- The live block to keep publishing after a refresh that found no current program: the
+-- announced next program once `cur`'s program has ended, `cur`'s own block when it has no
+-- boundary (an earlier rollover), else nil.
+local function carried_live(cur, now)
+  if type(cur) ~= "table" or type(cur.live) ~= "table" then return nil end
+  if Pipeline.live_ended(cur, now) then
+    local r = rolled_over(cur, now)
+    return r and r.live
+  end
+  return cur.live
+end
+
 function Engine:_live_refresh(key, seq)
   local function is_current() return self.state.media_key == key and self.live_seq == seq end
   self.live_last = self.deps.now()
@@ -349,17 +363,37 @@ function Engine:_live_refresh(key, seq)
     if not is_current() then return end
     local now = self.deps.now()
     local cur = self.state.details
-    if details and not Pipeline.live_ended(details, now) then
+    local lv = type(details) == "table" and details.live
+    local pe = type(lv) == "table" and tonumber(lv.program_end)
+    -- only a current program with a boundary is a successful refresh: anything else would stop
+    -- the rollover scheduling (nothing left that ends) after one transient schedule failure
+    if pe and now < pe then
       self.live_fails = 0
       if not util.deep_equal(details, cur) then
         self.state.details = details
         self:_bump({ details = true })
       end
     else
-      -- stale schedule / no answer: never keep publishing a program that has ended
+      -- no answer / stale schedule / no schedule at all: retry with backoff, and never keep
+      -- publishing a program that has ended
       self.live_fails = (self.live_fails or 0) + 1
-      if cur and Pipeline.live_ended(cur, now) then
-        self.state.details = rolled_over(cur, now)
+      local pub = cur
+      if details and not Pipeline.live_ended(details, now) then
+        -- details without a schedule (e.g. TMDB matched, Gracenote failed): its non-live parts
+        -- are current; keep the rolled-over / boundary-less program on top of them. Not cached,
+        -- so returning to the channel looks the schedule up again.
+        self.pipeline:invalidate(key)
+        pub = util.deep_copy(details)
+        if pub.live == nil then
+          pub.live = carried_live(cur, now)
+          if pub.live then Pipeline.merge(pub, { attribution = cur.attribution }) end
+        end
+      elseif cur and Pipeline.live_ended(cur, now) then
+        -- an ended schedule result describes the ended airing: nothing of it is used
+        pub = rolled_over(cur, now)
+      end
+      if not util.deep_equal(pub, cur) then
+        self.state.details = pub
         self:_bump({ details = true })
       end
       self.deps.log("info", "live program refresh for " .. key .. " found no current program; retrying")
