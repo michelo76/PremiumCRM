@@ -17,7 +17,7 @@ end
 
 local LUA_FILES = { "driver.lua", "c4/app.lua", "c4/config.lua", "c4/deps.lua", "c4/events.lua", "c4/room.lua",
   "c4/artwork.lua", "c4/httpserver.lua", "c4/status.lua", "c4/diagnostics.lua", "c4/variables.lua",
-  "c4/version.lua", "c4/b64.lua" }
+  "c4/version.lua", "c4/b64.lua", "c4/appletv.lua" }
 
 local function all_lua()
   local parts = {}
@@ -95,9 +95,22 @@ describe("driver.xml", function()
     end
   end)
   it("read-only status properties are marked readonly", function()
-    for _, n in ipairs({ "Driver Version", "Status", "Active Source", "Metadata Sources", "Web View URL", "LAN URL" }) do
+    for _, n in ipairs({ "Driver Version", "Status", "Active Source", "Metadata Sources", "Web View URL", "LAN URL",
+      "Apple TV Driver Status" }) do
       T.ok(xml.properties[n] and xml.properties[n].readonly, n)
     end
+  end)
+  it("DEVICE_SELECTOR properties carry an <items> filter (Composer: 'Property Invalid' without one)", function()
+    local n = 0
+    for name, p in pairs(xml.properties) do
+      if p.type == "DEVICE_SELECTOR" then
+        n = n + 1
+        T.ok(#p.items > 0, name .. " has no <items>")
+      end
+    end
+    T.ok(n >= 1)
+    T.deep_eq(xml.properties["Apple TV Driver"].items, { "smartbuildos_appletv_native.c4z" })
+    T.eq(xml.properties["Apple TV Driver Device ID"].type, "STRING")
   end)
   it("password properties", function()
     for _, n in ipairs({ "Apple TV Bridge Token", "Home Assistant Token", "TMDB API Key", "OMDb API Key", "Gracenote API Key" }) do
@@ -110,7 +123,7 @@ describe("driver.xml", function()
     for _, a in ipairs(xml.actions) do
       T.ok(app:find(a.command .. " = \"_action_", 1, true), "no handler for action " .. a.command)
     end
-    T.deep_eq(xml.commands, { "Refresh" })
+    T.deep_eq(xml.commands, { "Refresh", "Refresh Apple TV Now Playing" })
   end)
   it("version integer matches c4.version", function()
     local maj, min, pat = Version.VERSION:match("^(%d+)%.(%d+)%.(%d+)$")

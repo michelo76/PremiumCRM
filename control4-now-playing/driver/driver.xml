@@ -7,7 +7,7 @@
   <model>Now Playing Info</model>
   <created>11/11/2026 12:00</created>
   <modified>11/11/2026 12:00</modified>
-  <version>10000</version>
+  <version>10300</version>
   <control>lua_gen</control>
   <controlmethod>IP</controlmethod>
   <driver>DriverWorks</driver>
@@ -78,8 +78,20 @@
       <property><name>Status</name><type>STRING</type><default>Starting</default><readonly>true</readonly></property>
       <property><name>Active Source</name><type>STRING</type><default>None</default><readonly>true</readonly></property>
       <property><name>Metadata Sources</name><type>STRING</type><default>None</default><readonly>true</readonly></property>
-      <property><name>Web View URL</name><type>STRING</type><default></default><readonly>true</readonly></property>
-      <property><name>LAN URL</name><type>STRING</type><default>Disabled</default><readonly>true</readonly></property>
+      <property>
+        <name>Web View URL</name>
+        <type>STRING</type>
+        <default></default>
+        <readonly>true</readonly>
+        <description>The URL the Navigator button opens. While the LAN relay is listening it carries ?relay=http://controller-ip:port and the relay token (k=).</description>
+      </property>
+      <property>
+        <name>LAN URL</name>
+        <type>STRING</type>
+        <default>Disabled</default>
+        <readonly>true</readonly>
+        <description>Address of the LAN relay / page for browsers on the LAN (includes the token), or why it is not listening.</description>
+      </property>
 
       <property><name>Room Settings</name><type>LABEL</type><default>Room</default></property>
       <property>
@@ -108,6 +120,38 @@
       <property><name>Roku Settings</name><type>LABEL</type><default>Roku</default></property>
       <property><name>Roku Address</name><type>STRING</type><default></default><readonly>false</readonly></property>
       <property><name>Roku Name</name><type>STRING</type><default></default><readonly>false</readonly></property>
+
+      <property><name>Apple TV Driver Settings</name><type>LABEL</type><default>Apple TV (SmartBuildOS driver)</default></property>
+      <property>
+        <name>Apple TV Driver</name>
+        <type>DEVICE_SELECTOR</type>
+        <items><item>smartbuildos_appletv_native.c4z</item></items>
+        <multiselect>false</multiselect>
+        <default></default>
+        <readonly>false</readonly>
+        <description>The SmartBuildOS Apple TV Native driver (Beta 120 or later) in this project. Now playing is read from its NOW_PLAYING_* variables: no pairing, no bridge.</description>
+      </property>
+      <property>
+        <name>Apple TV Driver Device ID</name>
+        <type>STRING</type>
+        <default></default>
+        <readonly>false</readonly>
+        <description>Optional: the numeric device id of the Apple TV driver's main device. Use it when the selector picks a child proxy (Media Player / Apps &amp; Search / App Switcher) or does not list the driver. Overrides Apple TV Driver.</description>
+      </property>
+      <property>
+        <name>Apple TV Name</name>
+        <type>STRING</type>
+        <default></default>
+        <readonly>false</readonly>
+        <description>Optional display name for this Apple TV (default: the Apple TV driver's device name).</description>
+      </property>
+      <property>
+        <name>Apple TV Driver Status</name>
+        <type>STRING</type>
+        <default>Not configured</default>
+        <readonly>true</readonly>
+        <description>Which Apple TV driver device is read and its current snapshot revision, or why it cannot be read.</description>
+      </property>
 
       <property><name>Apple TV Settings</name><type>LABEL</type><default>Apple TV (companion bridge)</default></property>
       <property><name>Apple TV Bridge URL</name><type>STRING</type><default></default><readonly>false</readonly></property>
@@ -170,8 +214,9 @@
         <type>RANGED_INTEGER</type>
         <minimum>0</minimum>
         <maximum>65535</maximum>
-        <default>0</default>
+        <default>8487</default>
         <readonly>false</readonly>
+        <description>LAN relay: the page falls back to http://controller-ip:port when the Navigator does not deliver data. Touch screens must reach the controller on this TCP port. Token protected. 0 = off.</description>
       </property>
       <property>
         <name>Debug Mode</name>
@@ -192,6 +237,10 @@
       <command>
         <name>Refresh</name>
         <description>Refresh NAME now</description>
+      </command>
+      <command>
+        <name>Refresh Apple TV Now Playing</name>
+        <description>Refresh Apple TV Now Playing on NAME</description>
       </command>
     </commands>
   </config>

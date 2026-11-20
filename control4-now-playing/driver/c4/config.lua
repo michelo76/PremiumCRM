@@ -14,6 +14,10 @@ c4.config -- driver Properties -> np.engine config. Pure (no C4 calls): unit-tes
       lan_port = n, debug_mode = "Off"|...,
       secrets = { ... },          -- token/key strings to redact from logs
       watch_room = bool,          -- room variables must be watched
+      appletv_driver = { selected = id|nil, override = id|nil, name = "..."|nil } | nil,
+                                  -- the SmartBuildOS Apple TV driver source (c4.appletv watches
+                                  -- it and pushes into the static provider APPLETV_DRIVER_ID,
+                                  -- ordered before the pyatv bridge)
     }
 
 Every property is optional; defaults match driver.xml.
@@ -22,8 +26,10 @@ Every property is optional; defaults match driver.xml.
 local M = {}
 
 M.ROOM_PROVIDER_ID = "c4room"
+M.DEFAULT_LAN_PORT = 8487 -- LAN relay on by default (driver.xml "LAN Web Port"); 0 = off
 M.ROKU_GROUP = "dev-roku"
 M.APPLETV_GROUP = "dev-appletv"
+M.APPLETV_DRIVER_ID = "appletv_driver"
 
 local function trim(s)
   if s == nil then return nil end
@@ -75,6 +81,15 @@ function M.roku_host(v)
   return host, tonumber(port)
 end
 
+-- DEVICE_SELECTOR / manual id -> positive device id ("123", " 123 ", "123,456" -> 123) | nil
+function M.device_id(v)
+  v = trim(v)
+  if not v then return nil end
+  local n = tonumber(v) or tonumber(v:match("^(%d+)[,%s]") or "")
+  if not n or n <= 0 or n ~= math.floor(n) or n >= 4294967295 then return nil end
+  return n
+end
+
 -- TMDB accepts a v3 API key (32 hex chars) or a v4 read access token (a JWT, "eyJ...").
 function M.tmdb_auth(key)
   key = trim(key)
@@ -115,14 +130,32 @@ function M.build(Properties, ctx)
     info.warnings[#info.warnings + 1] = "Roku Address is not a valid host"
   end
 
-  -- Apple TV (companion bridge)
+  -- Apple TV: the SmartBuildOS Apple TV driver in this project (variable contract, read by
+  -- c4.appletv) first; the companion pyatv bridge stays as a fallback for Apple TVs without it.
+  -- Both are the same physical device for "Home Assistant Entity Is: Same Device As Apple TV".
+  local atv_sel = M.device_id(Properties["Apple TV Driver"])
+  local atv_override_raw = trim(Properties["Apple TV Driver Device ID"])
+  local atv_override = M.device_id(atv_override_raw)
+  if atv_override_raw and not atv_override then
+    info.warnings[#info.warnings + 1] = "Apple TV Driver Device ID is not a numeric device id"
+  end
   local atv_base = M.base_url(Properties["Apple TV Bridge URL"])
   local atv_dev = trim(Properties["Apple TV Device"])
   local atv_token = trim(Properties["Apple TV Bridge Token"])
   local atv_group
+  if ha_is == "Same Device As Apple TV" and ((atv_sel or atv_override) or (atv_base and atv_dev)) then
+    atv_group = M.APPLETV_GROUP
+  end
+  if atv_sel or atv_override then
+    local name = trim(Properties["Apple TV Name"])
+    info.appletv_driver = { selected = atv_sel, override = atv_override, name = name }
+    providers[#providers + 1] = {
+      type = "static", id = M.APPLETV_DRIVER_ID, provider_name = "appletv", name = name, group = atv_group,
+    }
+    info.sources[#info.sources + 1] = "Apple TV (driver)"
+  end
   secret(atv_token)
   if atv_base and atv_dev then
-    if ha_is == "Same Device As Apple TV" then atv_group = M.APPLETV_GROUP end
     local headers = { Accept = "application/json" }
     if atv_token then headers.Authorization = "Bearer " .. atv_token end
     providers[#providers + 1] = {
@@ -214,7 +247,7 @@ function M.build(Properties, ctx)
   local idle_s = int(Properties["Poll Interval Idle"], 5, 2, 120)
 
   info.embed_artwork = on(Properties["Embed LAN Artwork"], true)
-  info.lan_port = int(Properties["LAN Web Port"], 0, 0, 65535)
+  info.lan_port = int(Properties["LAN Web Port"], M.DEFAULT_LAN_PORT, 0, 65535)
   local dm = trim(Properties["Debug Mode"]) or "Off"
   info.debug_mode = DEBUG_MODES[dm] and dm or "Off"
 

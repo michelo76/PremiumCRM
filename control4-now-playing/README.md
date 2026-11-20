@@ -5,8 +5,9 @@ rich "about what's playing" page (poster, title, episode, synopsis, cast, rating
 behind a **Navigator button** (UI Button proxy web view). It also publishes **variables** and
 **events** for Composer programming. It is informational only and never controls playback.
 
-Sources: Roku (ECP), Apple TV (through the companion pyatv bridge in `bridge/`), Home Assistant
-media players, and Control4 room media. Metadata: TMDB, OMDb (IMDb / Rotten Tomatoes /
+Sources: Roku (ECP), Apple TV (read from the SmartBuildOS Apple TV Native driver already in the
+project — no pairing, no bridge — or, as a fallback, through the companion pyatv bridge in
+`bridge/`), Home Assistant media players, and Control4 room media. Metadata: TMDB, OMDb (IMDb / Rotten Tomatoes /
 Metacritic), Gracenote (optional), iTunes + MusicBrainz (keyless).
 
 The dealer documentation shown in Composer is [`driver/www/documentation.html`](driver/www/documentation.html).
@@ -18,20 +19,22 @@ The dealer documentation shown in Composer is [`driver/www/documentation.html`](
  Roku :8060 ◄────┤ np.providers.roku ─┐                                                   │
  ATV bridge ◄────┤ np.providers.bridge├─► np.providers.multi ─► np.engine ──► on_change ──┤
  Home Asst. ◄────┤ np.providers.ha  ──┤    (pick/merge/stale)     │   ▲  state doc (JSON) │
- C4 room vars ──►┤ c4.room → static ──┘                           │   │                   │
+ C4 room vars ──►┤ c4.room → static ──┤                           │   │                   │
+ ATV driver vars►┤ c4.appletv→static ─┘ (SmartBuildOS NOW_PLAYING_* contract)            │
                  │                                np.enrich.pipeline (TMDB/OMDb/GN/music) │
                  │                                                    ▲ deps (c4.deps:     │
                  │  c4.app (wiring) ◄──────────── engine events ──────┘  C4:url, timers,   │
                  │   ├─ c4.variables → C4:SetVariable (47 vars, STATE_JSON last)  Persist) │
                  │   ├─ c4.events    → C4:FireEvent (12 events)                            │
-                 │   ├─ proxy 5001   → URL_CHANGED / ICON_CHANGED                          │
+                 │   ├─ proxy 5001   → URL_CHANGED (url?relay=…&k=…) / ICON_CHANGED (text) │
                  │   ├─ SendDataToUI("NOW_PLAYING", {state=json+sent_at})                  │
                  │   ├─ c4.artwork   → GET_ARTWORK: one LAN image → data: URI (on demand)  │
-                 │   └─ c4.httpserver→ optional LAN  GET / , /api/state                    │
-                 └───────────────┬───────────────────────────────────────────────────────┘
-                                 │ Navigator JS API (works remotely)
-                    www/index.html (web view): subscribeToVariable("STATE_JSON"),
-                    subscribeToDataToUi, sendCommand("GET_STATE" | "GET_ARTWORK") → ExecuteCommand
+                 │   └─ c4.httpserver→ LAN relay :8487  GET / , /api/state , /api/artwork  │
+                 └───────────────┬──────────────────────────────────────┬────────────────┘
+                                 │ (1) Navigator JS API (works remotely) │ (2) LAN relay (?k=token)
+                    www/index.html (web view): subscribeToVariable / subscribeToDataToUi /
+                    sendCommand("GET_STATE" | "GET_ARTWORK", …, protocol=true; proxy=false as
+                    fallback); after ~5 s of silence: poll <relay>/api/state, art via /api/artwork
 ```
 
 * `driver/np/` — platform-agnostic core (no `C4` reference). The `deps` contract and config
@@ -47,8 +50,9 @@ control4-now-playing/
   driver/                     → zipped as now_playing_info.c4z
     driver.xml                proxies, capabilities, events, properties, actions, commands
     driver.lua                entry points only
-    c4/                       glue: app, config, deps, events, room, artwork, httpserver,
-                              status, diagnostics, variables (append-only list), version, b64
+    c4/                       glue: app, config, deps, events, room, appletv, artwork,
+                              httpserver, status, diagnostics, variables (append-only list),
+                              version, b64
     np/                       core: engine, providers, enrichers, schema, flatten, json, util
     www/index.html            the web UI (self-contained)
     www/documentation.html    dealer docs (Composer "Documentation" tab)
@@ -84,12 +88,16 @@ cd bridge && python -m pytest     # Apple TV bridge (incl. the bridge <-> Lua co
 
 `tools/e2e.sh` runs `tests/e2e/gen_states.lua`, which drives the **real** `driver.lua`
 (glue + engine + providers + enrichers) on the C4 mock with the scripted fixtures in
-`tests/fixtures` (Roku + HA episode with TMDB + OMDb, HA music with iTunes/MusicBrainz, Roku
+`tests/fixtures` (Roku + HA episode with TMDB + OMDb, an episode read from the SmartBuildOS Apple
+TV driver's variables (selector on its Media Player proxy) with TMDB + OMDb, HA music with iTunes/MusicBrainz, Roku
 antenna live TV + Gracenote, Apple TV bridge movie with LAN artwork, unenriched, paused, idle,
 off, room media only) and writes the exact `STATE_JSON`, `SendDataToUI` and `GET_ARTWORK`
 payloads to `build/e2e` (lua5.1 and LuaJIT output must be byte-identical). Then
 `tests/e2e/render.js` loads each into the real `www/index.html` with Playwright through the
-HTTP transport and a fake `window.C4` (DataToUI wrapper and STATE_JSON variable), with the
+HTTP transport, a fake `window.C4` (DataToUI wrapper and STATE_JSON variable) and the LAN relay
+(a fake `window.C4` that never answers + the driver's announced web view URL whose relay host is a
+local server on another origin replaying the driver's own `/api/state` / `/api/artwork` bytes,
+recorded by `gen_states.lua` into `<name>.relay.json`), with the
 browser clock 120 s off the controller's (proves `sent_at` skew correction), and asserts no
 console/page errors, title, S·E line, rating chips, cast count, progress, attribution,
 LAN artwork via GET_ARTWORK (never loaded directly in Navigator mode), the reconnecting pill
@@ -98,8 +106,14 @@ movie is also replayed on an open page as the engine publishes it (unenriched, t
 under the same `media_key`, then an update with unchanged image URLs) in both transports: the
 artwork and backdrop must switch to the TMDB images, and the unchanged update must keep the
 same `<img>` node.
-Screenshots (1280×800, 1920×1080, 390×844) go to `build/e2e/shots`. `tests/e2e/mock_c4.js`
-checks GET_ARTWORK through the mock server's fake Navigator.
+Screenshots (1280×800, 1920×1080, 390×844; `<name>-relay-1280x800.png` for relay mode) go to
+`build/e2e/shots`. `tests/e2e/mock_c4.js` drives the mock server's fake Navigator, which honours the
+protocol/proxy flag like the real API (`?c4proxy=1` = only the proxy flag works, `?c4dead=1` = the
+JS API never answers, `?c4delay=ms`, `?c4dieafter=N` = answers N GET_STATEs then goes dead) and
+its relay emulation (`--relay-port`): GET_ARTWORK with the protocol flag, a proxy-only runtime, the
+relay fallback with ETag/304, bad-key backoff, a remote client that cannot reach the relay, and a
+JS API that dies after its first delivery (heartbeat / page reopened → relay, C4 back → relay
+stops, no heartbeats while hidden).
 
 The c4z **must** be named `now_playing_info.c4z`: `controller://driver/now_playing_info/` maps
 to its `www/` folder (web view URL and Navigator icons).
@@ -116,40 +130,241 @@ order (driver.xml, driver.lua, then sorted; junk excluded; fixed timestamps).
 node tools/mock-server/server.js --port 8099
 # http://localhost:8099/?fixture=movie-full     (fixtures in tools/mock-server/fixtures)
 # ?kiosk=1  single-screen glance layout ; ?c4mock=1  exercise the Navigator (window.C4) path
+# node tools/mock-server/server.js --port 8099 --relay-port 8487   (+ LAN relay emulation:
+#   /?c4mock=1&c4dead=1&relay=http://127.0.0.1:8487&k=mock-relay-key-0001)
 ```
 
 ## Installing
 
 1. `python3 tools/build.py` → `build/now_playing_info.c4z`.
+   Firewall: touch screens (and the app on the home Wi-Fi) must reach the controller on TCP
+   **8487** (LAN Web Port) for the LAN relay fallback.
 2. Composer Pro: Driver › Add or Update Driver or Agent › select the c4z. Add **Now Playing
    Info** to a room.
 3. Configure properties (see the Documentation tab), run **Test Metadata Sources**.
 4. Room › Navigators › Watch/Listen: make **Now Playing** visible; refresh Navigators.
-5. Apple TV only: run the bridge (`bridge/README.md`).
+5. Apple TV: select the SmartBuildOS Apple TV Native driver in **Apple TV Driver** (see
+   "Apple TV driver source" below). Only for an Apple TV without that driver: run the bridge
+   (`bridge/README.md`).
 
 ## Data sources and what they can tell you
 
 | Source | App | Title | Episode / S·E | Artist/album | Play/pause | Position/duration | Artwork | Notes |
 |---|---|---|---|---|---|---|---|---|
 | Roku ECP | yes | **no** | no | no | yes | yes | app icon | Roku TV tuner: channel + program (guide data). Needs "Control by mobile apps" = Default/Permissive |
+| Apple TV driver (SmartBuildOS, variables) | yes | if the app publishes it | often (series/S/E) | yes (Music) | yes (Unknown → idle) | yes (position at the last observation; an estimate while Playing, bounded — see below) | only when the app reports an HTTPS URL | local, no pairing; kind is inferred (no type field) |
 | Apple TV bridge (pyatv) | yes | if the app publishes it | often | yes (Music) | yes | yes | yes (LAN URL; relayed for remote apps) | some DRM/live apps publish nothing; `movie`/`live_tv` are heuristics |
 | Home Assistant | often | yes | yes | yes | yes | yes | yes (LAN proxy; relayed for remote apps) | the catch-all (Sonos, Plex, Kodi, Chromecast, Android TV, Roku titles…) |
-| Control4 room media | no | yes | no | yes | **no** (shown as playing while room on) | no | sometimes (IMAGEURL) | 1031 XML is undocumented; tolerant parser |
+| Control4 room media | no | yes | no | yes | **no** (shown as playing while room on) | no | sometimes (base64 `<img>` / IMAGEURL) | 1031 XML undocumented; music shape confirmed by a live capture (`<mediatype>`, `<deviceid>`); tolerant parser |
 | TMDB | – | match | episode details | – | – | runtime | posters, backdrops, logos | free key; v3 key or v4 token |
 | OMDb | – | – | – | – | – | – | – | IMDb/RT/Metacritic ratings (IMDb has no public API) |
 | Gracenote | – | live program | – | – | – | – | yes | licence-gated, optional, **untested against the live API** |
 | iTunes + MusicBrainz | – | – | – | album, year, tracks | – | – | album art | keyless |
 
 Several sources can be active; the engine picks the most "active" (playing > buffering > paused
-> stopped/idle > off, ties by order Roku, Apple TV, HA, room) and merges titles from a source in
-the same physical-device group ("Home Assistant Entity Is = Same Device As Roku/Apple TV").
+> stopped/idle > off, ties by order Roku, Apple TV driver, Apple TV bridge, HA, room; the active
+source is kept while it ranks as high as the best) and merges titles from a source in the same
+physical-device group ("Home Assistant Entity Is = Same Device As Roku/Apple TV"; the Apple TV
+driver source and the bridge are both "the Apple TV").
+
+## Apple TV driver source (SmartBuildOS Apple TV Native)
+
+**Setup.** Needs **SmartBuildOS Apple TV Native Beta 120 or later**
+(`smartbuildos_appletv_native.c4z`) in the same project — the licensed or the unrestricted build.
+Select it in **Apple TV Driver** (a device selector filtered to that driver); optionally set **Apple TV Name**. No second pairing, no
+bridge, no network traffic: both drivers run on the same controller. **Apple TV Driver Status**
+(read-only) shows the device being read and the snapshot revision, or why it cannot be read.
+If the selector offers/stores one of the driver's child proxies, the main device is found
+automatically; when it is not, type the main device's id into **Apple TV Driver Device ID**
+(overrides the selector). The pyatv bridge properties can stay set as a fallback.
+
+**Contract** (from the Apple TV driver's author). Read-only STRING variables on the **main**
+Apple TV driver device — not on its Media Player (binding 5000), "Apple TV Apps & Search"
+(5001) or App Switcher (5002) proxies: `NOW_PLAYING_TITLE`, `_SERIES`, `_SEASON`, `_EPISODE`,
+`_ARTIST`, `_ALBUM`, `_APP_NAME` (display name, may fall back to the bundle id), `_APP_ID`,
+`_PLAY_STATE` (`Playing`/`Paused`/`Stopped`/`Interrupted`/`Seeking`/`Unknown`, empty when
+cleared), `_POSITION` (seconds at the last observation), `_DURATION`, `_ARTWORK_URL` (HTTPS or
+empty), `_UPDATED_AT` (controller epoch s; `0` when cleared), `_VALID` (`1` observed, `0`
+cleared) and `_REVISION` (incremented per snapshot; resets when that driver reloads). Missing
+fields are empty; position/duration may be `0`. Event 19 "Now Playing snapshot updated" fires
+after all of them are written. Not used on purpose: `PLAYBACK_POSITION` (a 1/s estimate) and
+event 12 (title only).
+
+**How it is read** (`driver/c4/appletv.lua`). Variable ids are never hard-coded: they are
+resolved by exact name from `C4:GetDeviceVariables(device)` (several table shapes accepted) and
+re-resolved when a read fails, a value is implausible (REVISION not a number, VALID not 0/1),
+REVISION goes backwards (a restart) or on the 30 s safety poll. Reads are triggered by a listener on
+`NOW_PLAYING_REVISION` (`C4:RegisterVariableListener`), by the Apple TV driver's event 19 (see
+below), by the programming command **Refresh Apple TV Now Playing**, by Refresh / Refresh Now, and
+immediately at driver start, on every selection change and on reconnection (re-resolved device /
+re-registered listener). Every read is REVISION → all fields → REVISION, retried up to 3 times while
+it moves — a torn snapshot is never published (retried 1 s later). An unchanged revision with
+unchanged content is ignored, so the listener, event 19 and the command arriving for the same
+snapshot cause **one** redraw (tested: state version, `STATE_JSON` writes and DataToUI pushes stay
+flat). Revision resets: a lower REVISION is a restart (ids re-resolved, listener/event re-registered);
+the *same* number with different content (a reset that landed on our number) is confirmed by a
+second read 1 s later and then applied. Refresh / the command force a re-apply (the engine
+publishes nothing when nothing changed).
+
+**Observing event 19 — what DriverWorks supports** (checked in Snap One's
+[docs-driverworks-api](https://github.com/snap-one/docs-driverworks-api), `source/includes/7_event/`):
+`C4:FireEvent(id)` (`_3-FireEvent.md`) fires an event *on the calling driver* — it is not a
+broadcast to other drivers. A driver can subscribe to **another device's** event with
+`C4:RegisterDeviceEvent(deviceId, eventId)` (`_5-RegisterDeviceEvent.md`, "Available in 2.9.0"),
+receiving `OnDeviceEvent(firingDeviceId, eventId)` (`_4.1-OnDeviceEvent.md`); undone with
+`C4:UnregisterDeviceEvent` / `UnregisterAllDeviceEvents` (`_7`, `_6`). The doc notes it needs the
+event id to be known and targets "drivers created in support of one another" (the id is part of the
+contract here). `C4:RegisterSystemEvent` / `OnSystemEvent` (`_5.5`, `_4.2`, `_1-RegisteringforSystemEvents.md`)
+cover system events only (OnPIP, device online/offline, bindings…), not a driver's own events.
+Variable changes: `C4:RegisterVariableListener` / `OnWatchedVariableChanged`
+(`36_variable/_10`, `_9`, 1.6.0). So this driver uses **both**: `RegisterDeviceEvent(<main device>, 19)`
+(guarded — a missing or failing API is logged and the rest works) and the REVISION listener; both are
+moved to the new device on a selection change and dropped on removal/destroy; late events from a
+previous selection are ignored. The **Refresh Apple TV Now Playing** programming command remains
+for Composer wiring if a controller turns out not to deliver either: Programming → select the Apple
+TV driver's main device → event **Now Playing snapshot updated** → actions: this driver → Device
+Specific Command → **Refresh Apple TV Now Playing**. It is **optional** while the REVISION listener
+(or event subscription) works — Apple TV Driver Status shows the revision advancing.
+
+**Licensed vs unrestricted builds.** Both ship as `smartbuildos_appletv_native.c4z`; their display
+name / model may differ. Nothing here keys off a name or model: a device is accepted as an Apple TV
+Native driver when it exposes `NOW_PLAYING_REVISION` (by name). The driver file names used to
+*find* candidates (selector filter, proxy → main-device search) are one list,
+`AppleTV.C4Z_NAMES` in `driver/c4/appletv.lua` (one entry today; a variant under another file name
+is one line there plus the matching `<item>` in driver.xml's **Apple TV Driver** selector — a test
+keeps the two equal). **Apple TV Driver Device ID** works for any file name.
+
+**Artwork rules.** Only `NOW_PLAYING_ARTWORK_URL` when it is `https://`; when it clears, the image
+is removed (page shows generated art), never kept. "Not inventing artwork" refers to this field: with
+TMDB / iTunes keys the page can show a poster from those metadata providers — legitimate, separate
+enrichment, labelled as such in the details. Driver-side downloads (`GET_ARTWORK`, LAN
+`/api/artwork`) of images that leave the state (new snapshot, other source, source removed) are
+cancelled (`Artwork:retain`, per-URL download token); a late response is neither cached nor
+delivered (GET_ARTWORK answers `not in current state`, the relay 410), and a URL absent from the
+current state is never served from the cache.
+
+**Progress rule.** `POSITION` is the position at the last observation (`UPDATED_AT`). **Progress
+shown while Playing is an estimate extrapolated from the Apple TV driver's last observation** (page
+and `POSITION_SECONDS` / `PROGRESS_PERCENT`). Only while Playing — never while paused, seeking
+(buffering), stopped, idle or cleared. Bounded: held at the duration; at most 4 h past `UPDATED_AT`
+(`np.flatten.MAX_EXTRAPOLATE_S`, page `EXTRAP_MAX_S`); beyond either the estimate is *stale*: frozen,
+dimmed, no "Ends" time. Numbers (`POSITION`, `DURATION`, `UPDATED_AT`, `SEASON`, `EPISODE`,
+`REVISION`) are parsed strictly (plain non-negative decimal, no hex/nan/inf/sign, plausible range);
+anything else is unknown, never an error, never negative/NaN/inf in state or JSON. The snapshot is pushed into
+the `static` provider `appletv_driver` (provider name `appletv`, ordered before the bridge).
+
+Mapping: Playing→playing, Paused→paused, Stopped→stopped, Seeking→buffering,
+Interrupted→paused, Unknown→idle; VALID=0 or an empty state → idle with all media and artwork
+cleared. Kind (inferred — the contract has no type field; same rules as the bridge): series or
+season/episode → episode; artist or album → music; duration > 60 min → movie; a title → video;
+else unknown. Season/episode must be plain numbers; artwork must be `https://`.
+
+**Device resolution**: Apple TV Driver Device ID, then Apple TV Driver; the first that exposes
+`NOW_PLAYING_REVISION` wins. Otherwise the main device is searched through the documented
+proxy↔protocol links (`C4:GetDevices({DeviceIds=…})` `protocol`/`proxies` sub-tables), then among
+the installed `smartbuildos_appletv_native.c4z` devices (`C4:GetDevicesByC4iName`,
+`C4:GetDevices({C4iNames=…})`, ownership via `C4:GetProxyDevicesById`) — all optional and guarded.
+A selected Apple TV driver without the variables (older beta) is reported, never swapped for
+another one; several Apple TV drivers with none related to the selection is reported as
+ambiguous (set the Device ID). Everything is logged and shown in **Apple TV Driver Status**;
+**Test Metadata Sources** lists the device, variables found/missing by name, revision and VALID.
+
+**Limits.** Metadata depends on what the app publishes (some apps report only the app). Artwork
+only when the app reports an HTTPS URL. The media kind is a heuristic. `Unknown` is shown as idle.
+A stalled Apple TV driver (still `VALID=1`, no more updates) cannot be told apart from a long
+pause: the last snapshot stays until it is cleared or replaced.
+A deleted Apple TV driver is noticed by the 30 s safety poll (then: off, artwork gone,
+subscriptions dropped); clearing the selection clears the display immediately.
+
+**Requires controller validation (this integration)** — not provable without a real controller:
+1. `C4:RegisterDeviceEvent(<Apple TV main device>, 19)` actually delivers `OnDeviceEvent` for an
+   unrelated driver's `C4:FireEvent(19)` (Lua output, Debug Mode = Print: "snapshot N (event 19)").
+2. `RegisterVariableListener` on `NOW_PLAYING_REVISION` fires on every write, and whether listener
+   and event registrations survive an Apple TV driver update/reload (else: the 30 s poll recovers).
+3. The `C4:GetDeviceVariables` table shape and that the ids resolved by name read the right values.
+4. What the DEVICE_SELECTOR stores (main device or a proxy) and that it lists **both** the
+   licensed and the unrestricted build (same c4z name).
+5. That Composer offers **Refresh Apple TV Now Playing** under the Apple TV driver's "Now Playing
+   snapshot updated" event, and it re-reads (Apple TV Driver Status revision).
+6. Controller clock: `UPDATED_AT` and our `now()` are the same controller clock (extrapolation).
+7. Artwork: `GET_ARTWORK` of an HTTPS Apple TV artwork URL from a remote Navigator; old image gone
+   when the URL clears (page).
 
 ## Page ↔ driver protocol
+
+### Transports (in this order)
+
+1. **Navigator JS API.** Snap One's WebView docs: the boolean argument of
+   `subscribeToVariable` / `subscribeToDataToUi` / `sendCommand` selects the **protocol** (the
+   driver itself: its `STATE_JSON` variable, `C4:SendDataToUI`, `ExecuteCommand`) when `true` and
+   the **proxy** when `false`. The page subscribes on both channels (proxy first, protocol last, each
+   call in its own `try`) and sends `GET_STATE` with `protocol = true`; on every no-response retry
+   (5 s, doubling to 30 s) it sends `GET_STATE` with `protocol = false` as well — the driver answers
+   it from `ReceivedFromProxy` (binding 5001) exactly like `ExecuteCommand`. `GET_ARTWORK` goes out
+   with `true`, and also with `false` after 4 s without a reply (immediately once the state itself
+   only came after a proxy-flag retry).
+2. **LAN relay** (field finding on a real touch screen: the JS API reply channel delivered nothing,
+   while query strings on the `web_view_url` did reach the page and a `C4:CreateServer` endpoint
+   worked). The driver listens on **LAN Web Port** (default **8487**, 0 = off) and announces
+   `controller://driver/now_playing_info/index.html?relay=<urlencoded http://<controller-ip>:<port>>&k=<token>`
+   with `URL_CHANGED` (relay params omitted while the server is off/failing or the controller IP is
+   unknown). Fallback is judged per request: every GET_STATE (first, retry, page shown again, and a
+   heartbeat after 45 s without any C4 delivery while the page is visible — the driver only pushes on
+   changes, but answers every GET_STATE) arms a ~5 s deadline. If no valid state arrives through the
+   JS API before it and the URL has `relay`, the page polls `<relay>/api/state?k=…` (2 s; ETag sent
+   back as `&inm=` so the request is "simple" and needs no CORS preflight → 304) while still
+   retrying the C4 channels (backing off to 30 s); whichever delivers a newer `version` wins, and the
+   next C4 delivery stops relay polling again. No heartbeats or retries while the page is hidden. In
+   relay mode LAN artwork is loaded from `<relay>/api/artwork?url=…&k=…` instead of GET_ARTWORK. A
+   phone away from home cannot reach the relay: while the JS API answers the relay is never touched;
+   otherwise failures back off to one request per 30 s, with one console warning. The reconnecting
+   pill shows only when both the JS API and the relay fail.
+3. No `window.C4` (a browser on the LAN opening `http://<controller>:<port>/?k=<token>`, the
+   **LAN URL** property): plain HTTP polling of `api/state?k=…` (or of the relay when `?relay=` is
+   given).
+
+`window.__npLast` records which channel delivered last for hardware checks:
+`{ via: 'dataToUi' | 'variable' | 'http' | 'relay', at: <ms epoch>, raw: <payload>, counts: {…},
+transport: 'c4' | 'relay' | 'http', fallbacks: <n>, fallbackAt: <ms epoch>, heartbeats: <n>,
+subscribe: ['variable:proxy:ok', …, 'dataToUi:protocol:threw'], dataToUi: <raw>, variable: <raw> }`.
+
+### LAN relay endpoints (`c4/httpserver.lua`)
+
+| Request | Auth | Answer |
+|---|---|---|
+| `GET /`, `/index.html` | none (static page, no secrets) | `www/index.html` from the c4z |
+| `GET /api/state?k=<token>[&inm=<etag>]` | token | state JSON (+`sent_at`), ETag / `If-None-Match` → 304 |
+| `GET /api/artwork?url=<u>&k=<token>` | token | the image bytes with their content type; only URLs present in the current state (same rule as GET_ARTWORK), ≤ 256 KB, cached, bridge token sent as a header; 403 otherwise, 502 when the download failed |
+| `OPTIONS *` | none | 204 (CORS preflight, belt and braces) |
+
+Wrong/missing token → 401 (compared without early exit). Every answer has
+`Access-Control-Allow-Origin: *` (the page's origin is `controller://…`; the token is the
+protection) and `Access-Control-Expose-Headers: ETag, Date`; `Connection: close`. A client that has
+not sent a complete request within 10 s gets 408 and is closed. The token is minted once (random,
+24 URL-safe characters) and persisted with `C4:PersistSetValue("np_lan_token_v1")`; the **Web View
+URL** and **LAN URL** properties show it, logs redact it (`k=***`). `C4:CreateServer(port, "",
+false, "now_playing_info_lan")` (identifier since OS 3.3.1; the 1-argument form is tried when that
+throws) returns `false, err` on failure — **LAN URL** and **Status** then show the error and the
+listen is retried after 5 s, doubling up to 5 min; `OnServerDataIn` / `OnServerConnectionStatusChanged`
+accept the appended address / identifier arguments and ignore other identifiers;
+`C4:DestroyServer(port)` is called with the port.
+
+### Navigator button
+
+`ICON_CHANGED` carries the "playing" icon state and a text: `DISPLAY_LINE_1`, prefixed with
+`Paused: ` when paused, at most 60 characters (UTF-8 safe, `…`): "The Bear — S2·E7 Forks",
+"Dreams — Fleetwood Mac", "Netflix" (app only); "Now Playing" when nothing plays. It is sent only
+when the icon or the text changes (not on position updates). Proxy notifications sent before the
+project has finished starting are lost, so `URL_CHANGED` (3 s after OnDriverLateInit) and the
+current `ICON_CHANGED` are sent again 60 s after OnDriverLateInit; `URL_CHANGED` is also re-sent
+whenever the relay URL changes (port, controller IP — checked every 15 s — or token).
+
+### Data
 
 * Variable `STATE_JSON` (STRING) holds the full state document (schema 1, `np/schema.lua`)
   plus a leading `"sent_at": <controller epoch s>` — rewritten only when the state version changes.
 * Every state change also goes out as `C4:SendDataToUI("NOW_PLAYING", { state = json })`.
-* `C4.sendCommand("GET_STATE", "{}", true, false)` → `ExecuteCommand("GET_STATE")` → an immediate
+* `C4.sendCommand("GET_STATE", "{}", true, true)` → `ExecuteCommand("GET_STATE")` → an immediate
   push (always, even if nothing changed; cheap: memoized JSON + `sent_at` splice).
   The synchronous form arrives in `UIRequest("GET_STATE")`, which returns the XML-escaped JSON.
 * `sent_at` is spliced into the engine's memoized JSON in the glue (`{"sent_at":N,...`); the page
@@ -161,7 +376,7 @@ the same physical-device group ("Home Assistant Entity Is = Same Device As Roku/
   by a remote Navigator, so in Navigator mode the **page** asks for it — when the host is LAN
   (same rule in `c4/artwork.lua` `is_lan` and the page's `isLan`) or when loading a public URL
   directly failed:
-  `C4.sendCommand("GET_ARTWORK", JSON.stringify({url}), true, false)` → `ExecuteCommand` →
+  `C4.sendCommand("GET_ARTWORK", JSON.stringify({url}), true, true)` → `ExecuteCommand` →
   the driver accepts only image URLs of the **current** state (artwork, app icon, poster,
   backdrop, logo, still, artist image — no open proxy), downloads it (≤ 256 KB, 12 cached,
   failures remembered 5 min, one download per URL however many pages ask; Apple TV bridge URLs
@@ -170,16 +385,15 @@ the same physical-device group ("Home Assistant Entity Is = Same Device As Roku/
   `{url=…, error=…}`. The page routes DataToUI payloads by shape (`schema` → state;
   `url` + `data|error` → artwork), caches data URIs by URL, keeps one request in flight per URL
   and swaps the image wherever that URL is used (hero artwork, backdrop, logo, app icon). In
-  HTTP/LAN mode the page loads images directly. **Embed LAN Artwork = Off** answers every
-  request with `error = "disabled"`.
+  HTTP/LAN mode the page loads images directly; in relay mode through `/api/artwork` (falling back
+  to a direct load). **Embed LAN Artwork = Off** answers every request with `error = "disabled"`
+  (403 on `/api/artwork`).
 * Credentials never appear in published URLs: the Apple TV bridge no longer puts `?token=` on
   artwork URLs (its artwork endpoint accepts the current `?v=` version instead), and
   `np.providers.bridge` strips `token` / `access_token` / `api_key` parameters from older
   bridges. Home Assistant's own `entity_picture` URL carries HA's short-lived, entity-scoped
   proxy token by HA's design (needed to load it on the LAN); it rotates, so ARTWORK_URL changes
   every few minutes for HA sources. Logs redact `token=` parameters.
-* Window helper for hardware checks: `window.__npLast` holds the raw last `onDataToUi` /
-  `onVariable` payloads.
 
 ## Verification status
 
@@ -195,63 +409,127 @@ change reconfiguration without timer leaks (20 rounds incl. room media / LAN por
 GET_STATE via ExecuteCommand and UIRequest, GET_ARTWORK (param shapes, current-state-only,
 one download per URL, bridge token header, oversize/failure/disabled), room media XML variants
 (TITLE/ARTIST/ALBUM/IMAGEURL plain + base64, LINE1-3, CDATA, attributes, JSON, empty, garbage),
-room power gating, LAN HTTP server (GET /, /api/state 200 → 304, 404, 405, HEAD, split chunks,
-413), destroy cleanup, actions, redaction of keys in logs/prints, no secret in any variable,
+room power gating, the Apple TV driver source (mapping table, initial read, revision updates,
+same-title seeks without Media Changed, VALID=0, torn reads never published, restart with re-numbered
+variable ids, proxy → main device, older beta / unrelated / deleted device, manual override,
+ambiguity, name-keyed variable tables, TMDB enrichment, bridge fallback, Refresh, diagnostics,
+listener/timer counts across reconfiguration and destroy; 1.3.0: event 19 via
+`RegisterDeviceEvent`/`OnDeviceEvent`, the "Refresh Apple TV Now Playing" command, one redraw for
+listener + event + command, same-revision resets, same-title artwork/state changes, disconnect
+clearing, our restart, junk numbers, licensed / unrestricted / other-file-name variants, source
+switching with late artwork responses, other sources unchanged), LAN HTTP server (GET /, /api/state 200 → 304, 404, 405, HEAD, split chunks,
+413), the LAN relay (token mint/persist/redaction, 401, `/api/artwork` bytes / 403 / 502, `?inm=`,
+OPTIONS, `CreateServer` false-return + backoff retry, legacy 1-argument fallback, identifier
+filtering, `DestroyServer(port)`, 10 s idle close, async answers dropped after a disconnect),
+`URL_CHANGED` with relay/token and its re-sends (60 s, port / IP changes), button text, the live
+room-media capture (`<deviceid>`, `<mediatype>`, base64 `<img>`, CURRENT_MEDIA shell), destroy cleanup, actions, redaction of keys in logs/prints, no secret in any variable,
 driver.xml ↔ Lua consistency, the bridge ↔ Lua contract (fixture generated by the Python
 mapping), a smoke test that loads driver.lua from the unzipped c4z, and the end-to-end render
-of real engine output in the real page (`tools/e2e.sh`).
+of real engine output in the real page (`tools/e2e.sh`, including relay mode: a silent fake JS API
+and the driver's own relay answers replayed byte for byte from another origin; plus the mock
+server's fake Navigator that honours the protocol/proxy flag, a proxy-only runtime, bad-key backoff
+and a remote client that cannot reach the relay).
 The web UI was tested in Chromium only, **not in the real Navigator web view (Gecko 96 based)**:
 it avoids newer syntax/CSS on purpose (ES5-style code, no `aspect-ratio`, no CSS `min()`),
 but rendering, `-webkit-line-clamp`, canvas accent sampling and data: URI images there are
 unverified.
 
+**Confirmed by a live capture** (another driver on a real system, verbatim in
+`tests/fixtures/c4room_*.xml`): the 1031 "CURRENT MEDIA INFO" shape for a music source —
+`<mediainfo><roomId/><mediatype>SONG</mediatype><artist/><album/><title/><img>base64 URL</img><deviceid>83</deviceid></mediainfo>`,
+XML-entity-escaped text, CURRENT_MEDIA (1005) reading as an empty shell
+`<mediainfo><mediaid>0</mediaid><mediatype/></mediainfo>` while playing, and CURRENT_SELECTED_DEVICE
+reading 0 while `<deviceid>` names the source. Also from field notes: the web_view_url query string
+reaches the page, a `C4:CreateServer` endpoint is reachable from a touch screen, and proxy
+notifications sent before the project finishes starting are lost.
+
 **Check these first on real hardware** (assumptions, in order of risk):
 
-1. **Room "CURRENT MEDIA INFO" (1031) XML shape** — undocumented. Run *Print Room Media Info*
-   with a few sources and compare with `c4/room.lua`. Also check `POWER_STATE` (1010) values
-   (assumed `1/0` or `ON/OFF`; fallback: CURRENT_SELECTED_DEVICE ≠ 0).
-2. **Navigator JS API payload wrappers** — what `onDataToUi` / `onVariable` actually receive
+1. **Which JS API channel delivers** — open the page on a touch screen and in the app, then read
+   `__npLast.via` / `__npLast.subscribe` in the web view console. `relay` means the JS API stayed
+   silent (expected on the panel from the field note); then check the protocol-flag semantics
+   (`true` = driver) against what `__c4log`-style tracing shows.
+2. **LAN relay from the web view** — `fetch()` from a `controller://` page to
+   `http://<controller>:8487` (CORS with `Access-Control-Allow-Origin: *`, no mixed-content block,
+   `ETag` readable through `Access-Control-Expose-Headers`, 304 passed to script) is assumed for the
+   Gecko 96 web view; touch screens on another VLAN / behind a firewall must reach TCP 8487.
+3. **`C4:CreateServer(port, "", false, identifier)`** returning `false, err` (not throwing), the
+   identifier being appended to `OnServerDataIn(h, data, addr, port, id)` /
+   `OnServerConnectionStatusChanged(h, port, status, addr, id)`, and `C4:DestroyServer(port)` —
+   from Snap One's docs and the owner's other drivers, not seen on this driver.
+4. **Room media for other source kinds** — video sources, LINE1–3 style drivers and other
+   `<mediatype>` values (only SONG is confirmed; MOVIE/VIDEO/TV mappings are guesses). Check
+   `POWER_STATE` (1010) values too (1/true/on and 0/false/off accepted in any case).
+5. **`ICON_CHANGED` `icon_description`** — whether Navigator shows it on the button and how it
+   truncates (we cap at 60 characters).
+6. **Navigator JS API payload wrappers** — what `onDataToUi` / `onVariable` actually receive
    (the page accepts `{"NOW_PLAYING":{"state":…}}`, `{"state":…}`, `{"STATE_JSON":…}`,
    `{"name":"STATE_JSON","value":…}`, raw string; artwork replies by the same rules) and
    whether `UIRequest`'s return is unescaped. Also what `ExecuteCommand` receives as `tParams`
    for `C4.sendCommand("GET_ARTWORK", "<json>", …)` (accepted: table with `url`, JSON string,
    or a table holding the JSON string under any key).
-3. **`C4:SendDataToUI` 2-argument form** (`"NOW_PLAYING", {state=…}`) and its size limit: state
+7. **`C4:SendDataToUI` 2-argument form** (`"NOW_PLAYING", {state=…}`) and its size limit: state
    pushes are now a few KB, but a `NOW_PLAYING_ARTWORK` reply carries one image as a data URI
    (≤ 256 KB raw → ~350 KB base64). If DataToUI is limited, lower `max_bytes` in `c4/artwork.lua`.
-4. **Dotted `require("np.engine")`** resolving inside the c4z (proved only against the unzipped
+8. **Dotted `require("np.engine")`** resolving inside the c4z (proved only against the unzipped
    tree with plain Lua `package.path`).
-5. `C4:url` delivering **binary bodies** intact (GET_ARTWORK) and `C4:Base64Encode` on them.
-6. `C4:ServerSend` followed immediately by `C4:ServerCloseClient` flushing the response; whether
-   `OnServerDataIn` chunks need `C4:CreateServer(port, delimiter)` instead of the 1-arg form.
-7. `ICON_CHANGED` state ids / `navigator_display_option` rendering, `URL_CHANGED` timing.
-8. `C4:DebugLog` existing on the target OS (falls back to `C4:ErrorLog`).
-9. The UI Button web view on the on-screen (TV) Navigator — undocumented, assumed unsupported.
-10. The page in the **Gecko 96** Navigator web view (layout, fonts, line clamps, data: images).
+9. `C4:url` delivering **binary bodies** intact (GET_ARTWORK) and `C4:Base64Encode` on them.
+10. `C4:ServerSend` followed immediately by `C4:ServerCloseClient` flushing the response (large
+    `/api/artwork` bodies included).
+11. `ICON_CHANGED` state ids / `navigator_display_option` rendering; `URL_CHANGED` with a query
+    string updating an already-configured button.
+12. `C4:DebugLog` existing on the target OS (falls back to `C4:ErrorLog`); `C4:UUID("Random")` (used
+    only to add entropy to the token when present).
+13. The UI Button web view on the on-screen (TV) Navigator — undocumented, assumed unsupported.
+14. The page in the **Gecko 96** Navigator web view (layout, fonts, line clamps, data: images).
+15. **Apple TV driver source** — the exact `C4:GetDeviceVariables` table shape (expected
+    `{[id]={name=,value=}}`; other shapes are tolerated), whether `GetDevicesByC4iName` /
+    `GetDevices` list the SmartBuildOS main device under its c4z name, what the DEVICE_SELECTOR
+    stores for a multi-proxy driver (main device or a proxy), whether listeners survive that
+    driver's reload, and that variable writes of another driver are delivered to
+    `OnWatchedVariableChanged` asynchronously (a synchronous delivery is handled too). 1.3.0: that
+    `C4:RegisterDeviceEvent` delivers the Apple TV driver's event 19 (`OnDeviceEvent`) and the
+    "Refresh Apple TV Now Playing" command — see "Requires controller validation" in that section.
 
 ### First install on a real controller — checklist
 
 Ordered by risk; each step names how to see the answer.
 
 1. **Driver loads (dotted `require`)** — add the c4z; Lua output must show `Now Playing Info
-   1.0.0 … started` (Debug Mode = Print). If you see `failed to load c4.app: module 'np.engine'
+   1.3.0 … started` (Debug Mode = Print). If you see `failed to load c4.app: module 'np.engine'
    not found`, dotted requires do not resolve inside the c4z on this OS: flatten the module
    names (e.g. `np_engine.lua`) before anything else.
-2. **Room media XML (1031)** — select a few sources in the room (Sonos/radio/TV), run the
-   **Print Room Media Info** action and compare the raw `[[…]]` value with the `parsed:` line.
-   Wrong/empty fields → adapt `c4/room.lua` `FIELDS`; check `POWER_STATE` values too.
-3. **DataToUI / variable payload shape** — open the Now Playing button on a touch screen, open the
-   web view's JS console (the Navigator's 4-tap debug console) and inspect `__npLast.dataToUi` and `__npLast.variable`. The page must leave the
-   "Connecting" screen; if it does not, the wrapper is a shape `extractPayload` does not know.
-   Then on a phone **off Wi-Fi**: LAN artwork (Roku icon, HA/Apple TV art) must appear
+2. **LAN relay up** — properties: **LAN URL** = `http://<controller-ip>:8487/?k=…` (not
+   `Error: …`), **Web View URL** = `controller://…/index.html?relay=http%3A%2F%2F<ip>%3A8487&k=…`.
+   From a PC on the touch screens' network: `curl -i "http://<controller>:8487/api/state?k=<token>"`
+   (200 + ETag; then 304 with `&inm=<etag>`; 401 without `k`). If it times out, open TCP 8487
+   between the touch screens / app devices and the controller (VLANs, firewalls).
+3. **Room media XML (1031)** — select a few sources in the room (Sonos/radio/TV), run the
+   **Print Room Media Info** action and compare the raw `[[…]]` value with the `parsed:` line
+   (it now also prints `mediatype=` and `deviceid=`). Wrong/empty fields → adapt `c4/room.lua`
+   `FIELDS` / `MEDIA_TYPES`; check `POWER_STATE` values too.
+4. **Which channel delivers** — open the Now Playing button on a touch screen, open the web view's JS
+   console (the Navigator's 4-tap debug console) and inspect `__npLast.via` (`dataToUi` / `variable`
+   = JS API, `relay` = LAN relay after ~5 s), `__npLast.subscribe`, `__npLast.raw`. The page must
+   leave the "Connecting" screen; if `via` is null, the wrapper is a shape `extractPayload` does
+   not know (look at `__npLast.dataToUi` / `.variable`) or the relay is unreachable. Repeat in the
+   Control4 app on Wi-Fi, then on a phone **off Wi-Fi**: the page must render through the JS API
+   (the relay is unreachable there) and LAN artwork (Roku icon, HA/Apple TV art) must appear
    (GET_ARTWORK round trip; check Lua output for `GET_ARTWORK refused`/`artwork not fetched`).
-4. **Button visibility** — Composer › room › Navigators › Watch/Listen: make **Now Playing**
-   visible, File › Refresh Navigators; the icon must switch to the "playing" variant while
-   something plays (ICON_CHANGED).
-5. **Events** — reboot the controller while a movie plays: no `Movie Started` must fire; pause /
+5. **Button visibility and text** — Composer › room › Navigators › Watch/Listen: make **Now
+   Playing** visible, File › Refresh Navigators; the icon must switch to the "playing" variant and
+   the label to what is playing ("Paused: …" when paused). Reboot the controller: within ~60 s the
+   button must open the relay URL and show the right state again.
+6. **Apple TV driver source** — select the Apple TV driver in **Apple TV Driver**; **Apple TV
+   Driver Status** must read `Connected to <name> (device N), revision R` with N the **main**
+   Apple TV driver device (not its Media Player / Apps & Search / App Switcher proxy). If it says
+   "has no NOW_PLAYING_* variables" or "Ambiguous", type the main device's id (Composer: the
+   Apple TV driver's device id, or the id shown in the status) into **Apple TV Driver Device ID**.
+   Play something on the Apple TV: title / state must follow within a second; run **Test Metadata
+   Sources** (all 15 variables found). Reload the Apple TV driver: the status must come back
+   within ~30 s with a low revision.
+7. **Events** — reboot the controller while a movie plays: no `Movie Started` must fire; pause /
    resume must fire Playback Paused / Resumed.
-6. Optional LAN port: `curl -i http://<controller>:<port>/api/state` (200 + ETag, then 304 with
-   `If-None-Match`).
 
 ## Roadmap
 

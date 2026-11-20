@@ -52,20 +52,25 @@ local function from_pkg(modname)
   end
   return false
 end
-for _, mod in ipairs({ "c4.app", "c4.config", "c4.room", "np.engine", "np.providers.roku", "np.enrich.pipeline", "np.json" }) do
+for _, mod in ipairs({ "c4.app", "c4.config", "c4.room", "c4.appletv", "np.engine", "np.providers.roku", "np.enrich.pipeline", "np.json" }) do
   check(from_pkg(mod), "require('" .. mod .. "') resolved inside the package")
 end
 
 -- www/ from the package through the LAN server (C4:FileOpen("www/index.html"))
 m:connect(1); m:client_send(1, "GET / HTTP/1.1\r\n\r\n")
 check(m:response(1):find("^HTTP/1.1 200") ~= nil and m:response(1):find("<html", 1, true) ~= nil, "www/index.html served from the package")
-m:connect(2); m:client_send(2, "GET /api/state HTTP/1.1\r\n\r\n")
-check(m:response(2):find('"app_name":"Netflix"', 1, true) ~= nil, "/api/state served")
+local token = m.env.NOW_PLAYING_APP.token
+m:connect(2); m:client_send(2, "GET /api/state?k=" .. token .. " HTTP/1.1\r\n\r\n")
+check(m:response(2):find('"app_name":"Netflix"', 1, true) ~= nil, "/api/state served (with the relay token)")
+m:connect(3); m:client_send(3, "GET /api/state HTTP/1.1\r\n\r\n")
+check(m:response(3):find("^HTTP/1.1 401") ~= nil, "/api/state without the token -> 401")
+check(m:proxy_cmds("URL_CHANGED")[1].params.url:find("?relay=http%3A%2F%2F192.168.1.5%3A8080&k=" .. token, 1, true) ~= nil,
+  "URL_CHANGED carries the relay + token")
 
 -- stamped by the build
 local ver = require("c4.version")
 check(ver.BUILD_DATE ~= "dev", "version.lua BUILD_DATE stamped (" .. ver.BUILD_DATE .. ")")
-check(m.xml.version == "10000", "driver.xml <version> stamped (" .. tostring(m.xml.version) .. ")")
+check(m.xml.version == "10300", "driver.xml <version> stamped (" .. tostring(m.xml.version) .. ")")
 check(m.updated_props["Driver Version"] == ver.string(), "Driver Version property = " .. tostring(m.updated_props["Driver Version"]))
 
 m:destroy()

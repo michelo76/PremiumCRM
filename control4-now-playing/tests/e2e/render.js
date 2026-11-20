@@ -14,6 +14,12 @@
  *             SendDataToUI("NOW_PLAYING", {state=json}) wrapped by command name);
  *             GET_ARTWORK -> onDataToUi({NOW_PLAYING_ARTWORK: {url, data}}) from the driver's reply
  *   c4-var    fake window.C4: only the STATE_JSON variable ({name:"STATE_JSON", value: json})
+ *   relay     fake window.C4 that never answers (field finding on a real touch screen) and the web
+ *             view URL the driver announced (?relay=...&k=<token>, relay host swapped for a local
+ *             server on ANOTHER port, i.e. cross-origin like controller:// -> http://). That server
+ *             replays the driver's own LAN relay answers byte for byte (<name>.relay.json: 200 /
+ *             304 via ?inm= / 401 / OPTIONS / /api/artwork image bytes). After ~5 s the page must
+ *             poll the relay and load LAN artwork from <relay>/api/artwork.
  *
  * The browser clock is set to sent_at + 120 s, so the progress labels prove that the page
  * corrects clock skew with the driver's sent_at. Remote images are served by a local route
@@ -35,6 +41,7 @@ const STATES = path.resolve(process.argv[2] || 'build/e2e');
 const SHOTS = path.resolve(process.argv[3] || path.join(STATES, 'shots'));
 const WWW = path.resolve(process.env.NP_WWW || path.join(__dirname, '../../driver/www'));
 const SKEW_S = 120;
+const RELAY_AFTER_MS = 5500;
 fs.mkdirSync(SHOTS, { recursive: true });
 
 const index = JSON.parse(fs.readFileSync(path.join(STATES, 'index.json'), 'utf8'));
@@ -91,10 +98,44 @@ function isLan(u) { return /^https?:\/\/(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|
 const failures = [];
 function check(cond, what) { if (!cond) failures.push(what); }
 
+// replays one raw HTTP response recorded from the Lua relay (status line, headers, body bytes)
+function replay(res, buf) {
+  const i = buf.indexOf('\r\n\r\n');
+  const head = buf.slice(0, i).toString('latin1').split('\r\n'), body = buf.slice(i + 4), h = {};
+  head.slice(1).forEach((l) => { const j = l.indexOf(':'); h[l.slice(0, j)] = l.slice(j + 1).trim(); });
+  res.writeHead(+head[0].split(' ')[1], h);
+  res.end(body);
+}
+async function startRelay(rec, log) {
+  const raw = (b) => Buffer.from(b, 'base64');
+  const srv = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    log.push(req.method + ' ' + u.pathname + u.search);
+    let b;
+    if (req.method === 'OPTIONS') b = rec.options;
+    else if (u.searchParams.get('k') !== rec.token) b = rec.unauthorized;
+    else if (u.pathname === '/api/state') b = (u.searchParams.get('inm') === rec.etag || req.headers['if-none-match'] === rec.etag) ? rec.not_modified : rec.state;
+    else if (u.pathname === '/api/artwork') b = rec.artwork[u.searchParams.get('url')];
+    if (!b) { res.writeHead(404, { 'Access-Control-Allow-Origin': '*' }); return res.end('not recorded'); }
+    replay(res, raw(b));
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  return { srv, base: 'http://127.0.0.1:' + srv.address().port };
+}
+
 async function run(browser, base, sc, transport, viewport, shot, extraQuery) {
-  const st = JSON.parse(read(sc.name + '.json'));
+  let st = JSON.parse(read(sc.name + '.json'));
   const dtu = JSON.parse(read(sc.name + '.dtu.json'));
   const artReplies = JSON.parse(read(sc.name + '.artwork.json'));
+  let relay = null, rec = null;
+  const relayLog = [];
+  if (transport === 'relay') {
+    rec = JSON.parse(read(sc.name + '.relay.json'));
+    relay = await startRelay(rec, relayLog);
+    // the relay answers "now": its sent_at is the controller clock the page corrects against
+    const body = Buffer.from(rec.state, 'base64').toString('utf8');
+    st = JSON.parse(body.slice(body.indexOf('\r\n\r\n') + 4));
+  }
   const ctx = await browser.newContext({ viewport, deviceScaleFactor: 1 });
   const page = await ctx.newPage();
   const errors = [];
@@ -106,7 +147,9 @@ async function run(browser, base, sc, transport, viewport, shot, extraQuery) {
     netImages.push(url);
     route.fulfill({ status: 200, contentType: 'image/svg+xml', headers: { 'Access-Control-Allow-Origin': '*' }, body: imageFor(url) });
   });
-  await page.clock.install({ time: new Date((st.sent_at + SKEW_S) * 1000) });
+  // relay: the replayed body is fetched ~5.5 s after load (the JS API's grace period), so start the
+  // clock that much earlier -- a live relay stamps sent_at when it answers
+  await page.clock.install({ time: new Date((st.sent_at + SKEW_S) * 1000 - (relay ? RELAY_AFTER_MS : 0)) });
   if (transport !== 'http') {
     await page.addInitScript(([mode, stateJson, dtuMsg, replies]) => {
       const log = window.__c4log = [];
@@ -119,6 +162,7 @@ async function run(browser, base, sc, transport, viewport, shot, extraQuery) {
         },
         sendCommand: (name, params, async, proto) => {
           log.push('sendCommand:' + name + ':' + params);
+          if (mode === 'relay') return; // the JS API delivers nothing
           if (name === 'GET_STATE' && mode === 'c4-dtu') send('onDataToUi', { [dtuMsg.cmd]: dtuMsg.params });
           if (name === 'GET_ARTWORK') {
             const url = JSON.parse(params).url;
@@ -129,8 +173,16 @@ async function run(browser, base, sc, transport, viewport, shot, extraQuery) {
       };
     }, [transport, JSON.stringify(st), dtu, artReplies]);
   }
-  const q = (transport === 'http' ? '?api=/state/' + sc.name : '?x=1') + (extraQuery || '');
+  let q = (transport === 'http' ? '?api=/state/' + sc.name : '?x=1') + (extraQuery || '');
+  if (relay) {
+    // the driver's own web view URL, relay host swapped for the local replay server
+    const wv = new URL(rec.webview_url.replace(/^controller:/, 'http:'));
+    if (!/^http:\/\/192\.168\.1\.5:8487$/.test(wv.searchParams.get('relay')) || wv.searchParams.get('k') !== rec.token) failures.push(sc.name + ': driver web view URL ' + rec.webview_url);
+    wv.searchParams.set('relay', relay.base);
+    q = wv.search;
+  }
   await page.goto(base + '/index.html' + q);
+  if (relay) await page.clock.fastForward(RELAY_AFTER_MS); // the JS API had its ~5 s
   await page.waitForFunction(() => document.body.classList.contains('mode-np') ||
     (document.body.classList.contains('mode-idle') && document.getElementById('idle-title').textContent !== 'Connecting'), null, { timeout: 8000 })
     .catch(() => errors.push('never rendered'));
@@ -216,13 +268,18 @@ async function run(browser, base, sc, transport, viewport, shot, extraQuery) {
       if (transport === 'http') continue;
       check(netImages.indexOf(u) < 0, `${tag}: LAN image loaded directly in Navigator mode: ${u}`);
     }
+    const viaRelay = (u) => relay.base + '/api/artwork?url=' + encodeURIComponent(u) + '&k=' + rec.token;
     if (transport !== 'http' && st.source.app_icon_url && isLan(st.source.app_icon_url)) {
-      check(ui.c4log.some((l) => l.indexOf('sendCommand:GET_ARTWORK:') === 0 && l.indexOf(JSON.stringify(st.source.app_icon_url)) > 0), tag + ': GET_ARTWORK for the app icon');
-      check(/^data:image\/png/.test(ui.icon || ''), tag + ': app icon from driver data URI, got ' + String(ui.icon).slice(0, 40));
+      if (relay) check(ui.icon === viaRelay(st.source.app_icon_url), tag + ': app icon from the relay, got ' + String(ui.icon).slice(0, 60));
+      else {
+        check(ui.c4log.some((l) => l.indexOf('sendCommand:GET_ARTWORK:') === 0 && l.indexOf(JSON.stringify(st.source.app_icon_url)) > 0), tag + ': GET_ARTWORK for the app icon');
+        check(/^data:image\/png/.test(ui.icon || ''), tag + ': app icon from driver data URI, got ' + String(ui.icon).slice(0, 40));
+      }
     }
     const shownLan = !(d && d.poster_url) && m.artwork_url && isLan(m.artwork_url);
     if (shownLan) {
       if (transport === 'http') check(ui.art === m.artwork_url, `${tag}: artwork direct ${ui.art}`);
+      else if (relay) check(ui.art === viaRelay(m.artwork_url), `${tag}: artwork via the relay, got ${String(ui.art).slice(0, 60)}`);
       else check(/^data:image\/png;base64,/.test(ui.art || ''), `${tag}: artwork via GET_ARTWORK, got ${String(ui.art).slice(0, 40)}`);
     }
   }
@@ -230,11 +287,22 @@ async function run(browser, base, sc, transport, viewport, shot, extraQuery) {
   if (extraQuery && /kiosk=1/.test(extraQuery)) {
     check(ui.kiosk && !ui.sectionsShown && !/has-sections/.test(ui.mode), tag + ': kiosk = single screen, no sections');
   }
-  if (transport === 'c4-dtu') check(ui.raw && ui.raw.dataToUi != null, tag + ': __npLast.dataToUi recorded');
+  if (transport === 'c4-dtu') check(ui.raw && ui.raw.dataToUi != null && ui.raw.via === 'dataToUi', tag + ': __npLast.dataToUi recorded');
+  if (relay) {
+    check(ui.raw && ui.raw.via === 'relay', tag + ': __npLast.via relay, got ' + (ui.raw && ui.raw.via));
+    check(relayLog.some((l) => l.indexOf('GET /api/state?k=' + rec.token) === 0), tag + ': relay polled with k ' + relayLog.join(' | '));
+    check(!relayLog.some((l) => /^OPTIONS/.test(l)), tag + ': no CORS preflight');
+    for (const u of idle ? [] : Object.keys(rec.artwork)) {
+      if (u === m.artwork_url && d && d.poster_url) continue; // hero shows the TMDB poster instead
+      check(relayLog.some((l) => l.indexOf('GET /api/artwork?url=' + encodeURIComponent(u)) === 0), tag + ': LAN image via relay: ' + u);
+    }
+    check(!ui.c4log.some((l) => l.indexOf('sendCommand:GET_ARTWORK:') === 0), tag + ': no GET_ARTWORK in relay mode');
+  }
   if (transport === 'c4-var') check(ui.raw && ui.raw.variable != null, tag + ': __npLast.variable recorded');
   if (transport !== 'http') check(ui.c4log.some((l) => /^sendCommand:GET_STATE/.test(l)), tag + ': GET_STATE sent');
   if (shot) await page.screenshot({ path: path.join(SHOTS, shot) });
   await ctx.close();
+  if (relay) relay.srv.close();
   return ui;
 }
 
@@ -310,6 +378,101 @@ async function runSequence(browser, base, sc, transport) {
   await ctx.close();
 }
 
+// ---------------------------------------------------------------- Apple TV driver source over time
+// atv_seq.json: the real driver's states for playing (artwork) -> same title, ARTWORK_URL cleared +
+// Paused -> VALID=0. The old picture must go (generated placeholder), progress must stop advancing
+// while paused, VALID=0 must show the idle screen. Then the progress estimate bounds: past the
+// duration it is held (stale, no "Ends"), with an unknown duration it stops 4 h after the observation.
+async function runAtvLifecycle(browser, base) {
+  const file = path.join(STATES, 'atv_seq.json');
+  if (!fs.existsSync(file)) { failures.push('atv_seq.json missing'); return; }
+  const steps = JSON.parse(fs.readFileSync(file, 'utf8')).steps;
+  const s0 = JSON.parse(steps[0]);
+  const tag = 'atv_lifecycle/c4-dtu';
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+  await page.route(/^https?:\/\/(?!127\.0\.0\.1)/, (route) => {
+    route.fulfill({ status: 200, contentType: 'image/svg+xml', headers: { 'Access-Control-Allow-Origin': '*' }, body: imageFor(route.request().url()) });
+  });
+  await page.addInitScript((first) => {
+    const send = (fn, x) => setTimeout(() => window[fn](x), 20);
+    window.__push = (json) => send('onDataToUi', { NOW_PLAYING: { state: json } });
+    window.C4 = {
+      subscribeToDataToUi: () => {}, subscribeToVariable: () => {},
+      sendCommand: (name, params) => {
+        if (name === 'GET_STATE') send('onDataToUi', { NOW_PLAYING: { state: first } });
+        if (name === 'GET_ARTWORK') send('onDataToUi', { NOW_PLAYING_ARTWORK: { url: JSON.parse(params).url, error: 'not in current state' } });
+      },
+    };
+  }, steps[0]);
+  await page.clock.install({ time: new Date((s0.sent_at + SKEW_S) * 1000) }); // device clock 2 min off
+  await page.goto(base + '/index.html?x=1');
+  const look = () => page.evaluate(() => {
+    const on = document.querySelector('#art-stack .art-layer.is-on');
+    const img = on && on.querySelector('img');
+    const p = document.getElementById('progress');
+    return {
+      img: img ? img.getAttribute('src') : null, gen: !!(on && on.querySelector('.gen')),
+      idle: document.body.classList.contains('mode-idle'), np: document.body.classList.contains('mode-np'),
+      left: document.getElementById('progress-left').textContent, right: document.getElementById('progress-right').textContent,
+      hidden: p.classList.contains('is-hidden'), paused: p.classList.contains('is-paused'), stale: p.classList.contains('is-stale'),
+      idleTitle: document.getElementById('idle-title').textContent,
+      bgImgs: Array.prototype.map.call(document.querySelectorAll('#bg .bg-layer.is-on img'), (i) => i.getAttribute('src')),
+    };
+  });
+  const waitFor = async (want, ms) => {
+    const end = Date.now() + ms; let v;
+    while (Date.now() < end) { v = await look(); if (want(v)) return v; await page.waitForTimeout(100); }
+    return v;
+  };
+  // 1. playing, artwork reported by the Apple TV driver
+  let v = await waitFor((x) => x.img === s0.media.artwork_url, 6000);
+  check(v.img === s0.media.artwork_url, `${tag}: artwork shown (${v.img})`);
+  check(!v.stale && !v.hidden && !v.paused, `${tag}: live progress ${JSON.stringify(v)}`);
+  // 2. same title, ARTWORK_URL cleared, Paused: the old picture must not stay
+  await page.evaluate((j) => window.__push(j), steps[1]);
+  v = await waitFor((x) => x.img === null && x.gen, 4000);
+  check(v.img === null && v.gen, `${tag}: cleared artwork -> generated placeholder, got ${JSON.stringify(v)}`);
+  await page.waitForTimeout(1600);
+  v = await look();
+  check(v.img === null && v.bgImgs.indexOf(s0.media.artwork_url) < 0, `${tag}: old image gone from artwork and backdrop`);
+  check(v.paused && !v.stale, `${tag}: paused progress`);
+  const left1 = v.left;
+  await page.waitForTimeout(2200);
+  v = await look();
+  check(v.left === left1 && /^13:20/.test(v.left), `${tag}: paused progress does not advance (${left1} -> ${v.left})`);
+  // 3. VALID=0: idle screen (metadata, artwork, progress and playback state cleared)
+  await page.evaluate((j) => window.__push(j), steps[2]);
+  v = await waitFor((x) => x.idle, 4000);
+  check(v.idle && !v.np && /^Nothing playing/.test(v.idleTitle), `${tag}: VALID=0 -> idle screen, got ${JSON.stringify(v)}`);
+  // 4. progress estimate bounds (same page, Playing again with an old observation)
+  const stale = JSON.parse(steps[0]);
+  stale.version += 10; stale.playback.position_updated_at = stale.sent_at - 3600; // 754 s + 1 h > 2280 s
+  await page.evaluate((j) => window.__push(j), JSON.stringify(stale));
+  v = await waitFor((x) => x.np && x.stale, 4000);
+  check(v.stale && v.left === '38:00' && v.right === '−0:00' && v.right.indexOf('Ends') < 0,
+    `${tag}: past the duration -> held at the duration, stale, no "Ends" (${JSON.stringify(v)})`);
+  const open = JSON.parse(steps[0]);
+  open.version += 20; open.playback.duration_s = null; open.playback.position_updated_at = open.sent_at - 5 * 3600;
+  await page.evaluate((j) => window.__push(j), JSON.stringify(open));
+  v = await waitFor((x) => x.np && x.stale && x.left !== '38:00', 4000);
+  const want = '4:12:34'; // 754 s + 4 h, frozen
+  check(v.stale && v.left === want, `${tag}: unknown duration -> stops 4 h after the observation (${v.left}, want ${want})`);
+  await page.waitForTimeout(2200);
+  check((await look()).left === want, `${tag}: frozen estimate does not advance`);
+  const fresh = JSON.parse(steps[0]);
+  fresh.version += 30; fresh.playback.duration_s = null; fresh.playback.position_updated_at = fresh.sent_at;
+  await page.evaluate((j) => window.__push(j), JSON.stringify(fresh));
+  v = await waitFor((x) => !x.stale, 4000);
+  check(!v.stale, `${tag}: a fresh observation is live again`);
+  await page.screenshot({ path: path.join(SHOTS, 'atv_lifecycle-stale.png') });
+  errors.forEach((e) => failures.push(tag + ': ' + e));
+  await ctx.close();
+}
+
 (async () => {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = 'http://127.0.0.1:' + server.address().port;
@@ -317,7 +480,7 @@ async function runSequence(browser, base, sc, transport) {
   const DESK = { width: 1280, height: 800 }, PHONE = { width: 390, height: 844 }, HD = { width: 1920, height: 1080 };
   let runs = 0;
   for (const sc of index.scenarios) {
-    for (const transport of ['http', 'c4-dtu', 'c4-var']) {
+    for (const transport of ['http', 'c4-dtu', 'c4-var', 'relay']) {
       await run(browser, base, sc, transport, DESK, `${sc.name}-${transport}-1280x800.png`); runs++;
     }
     await run(browser, base, sc, 'c4-dtu', PHONE, `${sc.name}-c4-dtu-390x844.png`); runs++;
@@ -325,6 +488,7 @@ async function runSequence(browser, base, sc, transport) {
     if (['episode', 'music'].indexOf(sc.name) >= 0) { await run(browser, base, sc, 'http', DESK, `${sc.name}-kiosk-1280x800.png`, '&kiosk=1'); runs++; }
     if (sc.pre) for (const transport of ['http', 'c4-dtu']) { await runSequence(browser, base, sc, transport); runs++; }
   }
+  await runAtvLifecycle(browser, base); runs++;
   await browser.close();
   server.close();
   if (failures.length) {

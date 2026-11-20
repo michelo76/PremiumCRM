@@ -21,7 +21,7 @@
 <body>
 
 <h1>Now Playing Info</h1>
-<p class="muted">Control4 DriverWorks driver &middot; version 1.0 &middot; OS 3.1.3 or later</p>
+<p class="muted">Control4 DriverWorks driver &middot; version 1.2 &middot; OS 3.1.3 or later</p>
 
 <p>Now Playing Info figures out <b>what is playing in a room</b> and shows a rich
 &ldquo;about what&rsquo;s playing&rdquo; page (poster, title, episode, synopsis, cast, ratings, progress)
@@ -39,14 +39,16 @@ The driver is purely informational: it never controls playback.</p>
 <ol>
   <li>Add the driver to the room whose media you want to show (or set the <b>Room</b> property).</li>
   <li>Fill in at least one source below. With no other source, the driver uses the Control4 room&rsquo;s own media information (on by default).</li>
+  <li>Apple TV with the SmartBuildOS Apple TV Native driver (Beta 120+): just select it in <b>Apple TV Driver</b> and check <b>Apple TV Driver Status</b> (see <a href="#atvdriver">below</a>).</li>
   <li>Optional but recommended: enter a free <b>TMDB API Key</b> (posters, synopsis, cast) and an <b>OMDb API Key</b> (IMDb / Rotten Tomatoes / Metacritic ratings).</li>
   <li>Make the button visible in Navigator (see <a href="#button">Showing the button</a>) and refresh Navigators.</li>
   <li>Run the action <b>Test Metadata Sources</b> and check the <b>Status</b> property.</li>
+  <li>Make sure touch screens (and phones on the home Wi-Fi) can reach the controller on TCP port <b>8487</b> (<b>LAN Web Port</b>); see <a href="#relay">LAN relay</a>.</li>
 </ol>
 
 <h2 id="sources">Sources (where &ldquo;what is playing&rdquo; comes from)</h2>
 <p>You can configure several sources at once; the driver shows the one that is playing
-(playing &gt; buffering &gt; paused &gt; stopped/idle &gt; off; ties go to Roku, then Apple TV, then Home Assistant, then Control4 room media).</p>
+(playing &gt; buffering &gt; paused &gt; stopped/idle &gt; off; ties go to Roku, then the Apple TV driver, then the Apple TV bridge, then Home Assistant, then Control4 room media).</p>
 
 <h3>Roku (Roku players and Roku TVs)</h3>
 <ul>
@@ -55,7 +57,19 @@ The driver is purely informational: it never controls playback.</p>
   <li>Roku reports the <b>app</b> (Netflix, Hulu&hellip;) and <b>play / pause / position</b>, but <b>not the title</b>. For titles, also add the same Roku through Home Assistant and set <b>Home Assistant Entity Is = Same Device As Roku</b>. On a Roku TV&rsquo;s antenna input the channel and, when guide data is present, the program are shown.</li>
 </ul>
 
-<h3>Apple TV (via the companion bridge)</h3>
+<h3 id="atvdriver">Apple TV (via the SmartBuildOS Apple TV Native driver) &mdash; recommended</h3>
+<ul>
+  <li>Requires <b>SmartBuildOS Apple TV Native Beta 120 or later</b> (<code>smartbuildos_appletv_native.c4z</code>) in the same project &mdash; the licensed build or the unrestricted build (both ship under that file name; this driver recognises the Apple TV driver by its <code>NOW_PLAYING_REVISION</code> variable, never by its name or model). Nothing else: no second pairing, no bridge, no network traffic &mdash; both drivers run on the controller.</li>
+  <li>Set <b>Apple TV Driver</b> to that Apple TV driver (the list only offers it). Optional <b>Apple TV Name</b> replaces its device name on the page.</li>
+  <li>Check <b>Apple TV Driver Status</b>: it must read <i>Connected to &lt;name&gt; (device N), revision R</i>. N must be the Apple TV driver&rsquo;s <b>main</b> device. The selector may store one of its child devices (Media Player, &ldquo;Apple TV Apps &amp; Search&rdquo;, App Switcher); the driver then finds the main device itself. If the status says it cannot (&ldquo;has no NOW_PLAYING_* variables&rdquo;, &ldquo;Ambiguous&rdquo;), type the main device&rsquo;s id into <b>Apple TV Driver Device ID</b> (it overrides the selector).</li>
+  <li>The driver reads the Apple TV driver&rsquo;s <code>NOW_PLAYING_*</code> variables and follows its snapshot revision; play/pause, title, series/season/episode, artist/album, app, position and duration update within about a second. Updates arrive two ways, both automatic: a listener on the Apple TV driver&rsquo;s <code>NOW_PLAYING_REVISION</code> variable, and a subscription to its event 19 &ldquo;Now Playing snapshot updated&rdquo; (DriverWorks <code>C4:RegisterDeviceEvent</code>, OS 2.9+). A 30-second safety check catches anything missed. A notification for a snapshot already shown changes nothing (no redraw).</li>
+  <li><b>Programming (optional, belt and braces):</b> <code>WHEN &lt;Apple TV driver&gt; &rsaquo; Now Playing snapshot updated</code> &rarr; <code>Now Playing Info &rsaquo; Refresh Apple TV Now Playing</code>. In Composer Pro: Programming &rarr; select the Apple TV driver&rsquo;s main device in the event tree &rarr; event &ldquo;Now Playing snapshot updated&rdquo; &rarr; in the actions pane select this driver &rarr; Device Specific Command &rarr; <b>Refresh Apple TV Now Playing</b> &rarr; drag it in. Not needed while <b>Apple TV Driver Status</b> shows <i>Connected</i> and updates arrive (the variable listener / event subscription); add it if a controller ever misses updates.</li>
+  <li>What you see depends on what the app publishes: some apps report only the app name. Artwork comes from the Apple TV driver only when the app reports an HTTPS image; when that image is cleared, the old picture is removed, never kept. With metadata keys the page may show a poster from TMDB (or iTunes for music) &mdash; that is metadata-provider artwork, not invented by the Apple TV source. Otherwise the page shows generated art. Movie / episode / music is inferred (the Apple TV driver has no media-type field). &ldquo;Unknown&rdquo; is shown as idle; a cleared snapshot (VALID=0) clears title, artwork, progress and play state.</li>
+  <li><b>Progress</b>: the Apple TV driver reports the position at its last observation. <b>While Playing, the progress shown (page and <code>POSITION_SECONDS</code> / <code>PROGRESS_PERCENT</code>) is an estimate extrapolated from that observation.</b> It stops on pause, seeking, stop or a cleared snapshot; it never runs past the duration and never more than 4 hours past the observation &mdash; beyond either it freezes (dimmed on the page, no &ldquo;Ends&rdquo; time).</li>
+  <li>You can keep the bridge properties below set as a fallback; when both report something, the Apple TV driver is preferred.</li>
+</ul>
+
+<h3>Apple TV (via the companion bridge) &mdash; only without the Apple TV driver</h3>
 <ul>
   <li>Apple TV has no simple network API, so a small companion service, the <b>Apple TV bridge</b>, must run on an always-on computer on the same network (Raspberry Pi, NAS, Docker host). It ships with this driver&rsquo;s source in the <code>bridge/</code> folder; its README has the full steps:
     <ol>
@@ -102,19 +116,40 @@ The driver is purely informational: it never controls playback.</p>
   <li>Under <b>Watch</b> and/or <b>Listen</b>, find <b>Now Playing</b> (this driver&rsquo;s button) and make it <b>visible</b>; move it to the position you like.</li>
   <li><b>Refresh Navigators</b> (File &rsaquo; Refresh Navigators, or from the Navigators view).</li>
 </ol>
-<p>Tapping the button opens the Now Playing page. The icon changes to a highlighted &ldquo;playing&rdquo; variant while something is playing.
+<p>Tapping the button opens the Now Playing page. While something plays, the icon changes to a highlighted &ldquo;playing&rdquo; variant and the
+button&rsquo;s text shows what is playing, e.g. &ldquo;The Bear &mdash; S2&middot;E7 Forks&rdquo;, &ldquo;Dreams &mdash; Fleetwood Mac&rdquo; or just the app
+(&ldquo;Netflix&rdquo;) when the title is unknown; &ldquo;Paused: &hellip;&rdquo; while paused (at most 60 characters). With nothing playing it reads &ldquo;Now Playing&rdquo;.
 The page works on touch screens and in the Control4 app, including remotely: it receives its data through the Navigator. Artwork that lives on your LAN
 (Roku app icons, Apple TV bridge, Home Assistant, NAS) cannot be reached by a phone away from home, so the page asks the controller for it and the controller
 sends that one image back (<b>Embed LAN Artwork = On</b>). Only images of what is currently playing are fetched this way.</p>
 
+<h3 id="relay">LAN relay (on by default)</h3>
+<p>On some touch screens the Navigator delivers no data to the page. The driver therefore also listens on the controller&rsquo;s <b>LAN Web Port</b>
+(default <b>8487</b>) and puts that address into the button&rsquo;s URL (<code>?relay=http://&lt;controller-ip&gt;:8487&amp;k=&lt;token&gt;</code>,
+see the read-only <b>Web View URL</b> property). When the Navigator does not answer within about 5 seconds &mdash; at start, when the page is
+reopened, or on a check about every 45 seconds while the page is shown &mdash; it fetches the information (and LAN artwork) directly from the
+controller on that port; as soon as the Navigator delivers again, it switches back.</p>
+<ul>
+  <li><b>Firewall:</b> touch screens and phones on the home network must be able to reach the controller on <b>TCP 8487</b> (or the port you set).
+      Check VLANs / client isolation between the touch screens and the controller.</li>
+  <li><b>Token:</b> the data endpoints need a random token that the driver creates once and keeps across reboots and driver updates. It is part of
+      the Web View URL / LAN URL and is never written to the log. The page itself (<code>/</code>) carries no secrets and needs no token.</li>
+  <li>Phones away from home cannot reach the relay; they keep using the Navigator (the page retries the relay at most every 30 s).</li>
+  <li><b>LAN Web Port = 0</b> turns the relay off. If the port is taken, <b>LAN URL</b> and <b>Status</b> show the error and the driver keeps retrying.</li>
+</ul>
+
 <h2 id="props">Properties</h2>
 <table>
   <tr><th>Property</th><th>Default</th><th>Notes</th></tr>
-  <tr><td>Driver Version, Status, Active Source, Metadata Sources, Web View URL, LAN URL</td><td>&ndash;</td><td>Read-only. <b>Status</b> shows what is playing (&ldquo;Playing &mdash; The Bear (Netflix on Living Room Roku)&rdquo;) plus any per-source error.</td></tr>
+  <tr><td>Driver Version, Status, Active Source, Metadata Sources, Web View URL, LAN URL</td><td>&ndash;</td><td>Read-only. <b>Status</b> shows what is playing (&ldquo;Playing &mdash; The Bear (Netflix on Living Room Roku)&rdquo;) plus any per-source or LAN port error. <b>Web View URL</b> is what the button opens (with the relay address and token); <b>LAN URL</b> is the relay / page address for LAN browsers, or why the port is not listening.</td></tr>
   <tr><td>Room</td><td>(empty)</td><td>Room to report on; empty = the room the driver is in.</td></tr>
   <tr><td>Use Control4 Room Media</td><td>On</td><td>See Sources.</td></tr>
   <tr><td>Show Only When Room Is On</td><td>Off</td><td>See Sources.</td></tr>
   <tr><td>Roku Address, Roku Name</td><td>&ndash;</td><td>IP or hostname (port 8060 implied).</td></tr>
+  <tr><td>Apple TV Driver</td><td>(empty)</td><td>The SmartBuildOS Apple TV Native driver (Beta 120+). See <a href="#atvdriver">Sources</a>.</td></tr>
+  <tr><td>Apple TV Driver Device ID</td><td>(empty)</td><td>Optional numeric id of the Apple TV driver&rsquo;s main device; overrides Apple TV Driver.</td></tr>
+  <tr><td>Apple TV Name</td><td>(empty)</td><td>Optional display name for the Apple TV (default: the Apple TV driver&rsquo;s device name).</td></tr>
+  <tr><td>Apple TV Driver Status</td><td>&ndash;</td><td>Read-only: the device being read and its snapshot revision, or why it cannot be read.</td></tr>
   <tr><td>Apple TV Bridge URL, Apple TV Device, Apple TV Bridge Token</td><td>&ndash;</td><td>See Sources.</td></tr>
   <tr><td>Home Assistant URL, Token, Entity ID, Entity Is</td><td>Separate Device</td><td>See Sources.</td></tr>
   <tr><td>TMDB / OMDb / Gracenote API Key, Gracenote Lineup ID</td><td>&ndash;</td><td>Password fields; never written to logs.</td></tr>
@@ -122,20 +157,20 @@ sends that one image back (<b>Embed LAN Artwork = On</b>). Only images of what i
   <tr><td>Metadata Language, Content Rating Country</td><td>en-US, US</td><td></td></tr>
   <tr><td>Poll Interval Playing / Idle</td><td>2 s / 5 s</td><td>How often sources are asked while something plays / while idle.</td></tr>
   <tr><td>Embed LAN Artwork</td><td>On</td><td>Let the page ask the controller for LAN-only artwork (up to 256 KB per image, last 12 cached) so remote apps can show it. Off: remote apps show generated artwork instead.</td></tr>
-  <tr><td>LAN Web Port</td><td>0 (off)</td><td>Optional: serve the page and <code>/api/state</code> JSON on <code>http://&lt;controller-ip&gt;:&lt;port&gt;/</code> for browsers/kiosks on the LAN. Unauthenticated, LAN only.</td></tr>
+  <tr><td>LAN Web Port</td><td>8487 (on)</td><td>The <a href="#relay">LAN relay</a>: the page&rsquo;s fallback data channel, plus the page itself for browsers/kiosks on the LAN at the address shown in <b>LAN URL</b> (<code>http://&lt;controller-ip&gt;:&lt;port&gt;/?k=&lt;token&gt;</code>). Data (<code>/api/state</code>, <code>/api/artwork</code>) needs the token. Touch screens must reach this TCP port. 0 = off.</td></tr>
   <tr><td>Debug Mode</td><td>Off</td><td>Print, Log, or Print and Log. Keys and tokens are redacted.</td></tr>
 </table>
 
 <h2 id="actions">Actions</h2>
 <table>
   <tr><th>Action</th><th>What it does</th></tr>
-  <tr><td>Refresh Now</td><td>Ask all sources immediately.</td></tr>
+  <tr><td>Refresh Now</td><td>Ask all sources immediately (re-reads the Apple TV driver too).</td></tr>
   <tr><td>Clear Metadata Cache</td><td>Forget cached TMDB/OMDb/music lookups and artwork fetched for the page.</td></tr>
   <tr><td>Print State</td><td>Prints every variable value and the per-source state to the Lua output window.</td></tr>
   <tr><td>Print Room Media Info</td><td>Prints the room&rsquo;s raw media variables (incl. &ldquo;CURRENT MEDIA INFO&rdquo;) and how the driver parsed them. If room media shows wrong or empty, please send us this output.</td></tr>
-  <tr><td>Test Metadata Sources</td><td>Makes one small request to each configured source and metadata service and prints OK or the reason it failed.</td></tr>
+  <tr><td>Test Metadata Sources</td><td>Makes one small request to each configured source and metadata service and prints OK or the reason it failed. For the Apple TV driver: the device read, which <code>NOW_PLAYING_*</code> variables were found or are missing, the revision and VALID.</td></tr>
 </table>
-<p>Programming command: <b>Refresh</b> (same as Refresh Now).</p>
+<p>Programming commands: <b>Refresh</b> (same as Refresh Now) and <b>Refresh Apple TV Now Playing</b> (re-reads only the selected Apple TV driver&rsquo;s snapshot, immediately; the target for its &ldquo;Now Playing snapshot updated&rdquo; event &mdash; see <a href="#atvdriver">Sources</a>).</p>
 
 <h2 id="vars">Variables</h2>
 <p>Strings are empty and numbers 0 when unknown. Boolean variables are 1/0.</p>
@@ -201,6 +236,7 @@ WHEN Now Playing Info  Details Available
 <ul>
   <li><b>Roku</b> (ECP) reports the app and play/pause/position but no title. Combine it with Home Assistant for titles.</li>
   <li><b>Apple TV</b>: some apps publish no metadata at all (only playing/paused). Live TV apps rarely give a channel.</li>
+  <li><b>Apple TV driver</b>: artwork only when the app reports an HTTPS image; the media kind is a best guess; &ldquo;Unknown&rdquo; shows as idle. If the Apple TV driver stops updating while it still reports something, this driver cannot tell that apart from a long pause and keeps showing the last snapshot until it is cleared (a Playing estimate stops 4 h after the last observation). A deleted Apple TV driver is noticed within 30 s.</li>
   <li><b>Control4 room media</b> has no play/pause state; it is shown as playing while the room is on and media information exists.
       The exact format of the room&rsquo;s &ldquo;CURRENT MEDIA INFO&rdquo; differs between source drivers; the parser is tolerant, but if titles are wrong use <b>Print Room Media Info</b>.</li>
   <li>Metadata matching is by title (and year/season/episode when known); unusual titles, home videos and YouTube are deliberately not matched.</li>
@@ -208,7 +244,8 @@ WHEN Now Playing Info  Details Available
   <li>The <b>Gracenote</b> path is implemented to the published API but has not been tested against the live service.</li>
   <li>Remote access: LAN artwork is relayed by the controller only up to 256 KB per image; larger images show on the LAN only
       (remote apps show generated artwork). Internet images (TMDB, iTunes&hellip;) load directly.</li>
-  <li>The optional LAN web port has no authentication: only enable it on a trusted network.</li>
+  <li>The LAN relay is plain HTTP on your LAN, protected by the token in the button&rsquo;s URL (anyone who has the URL can read what is playing,
+      nothing more: the driver is read-only). Set <b>LAN Web Port = 0</b> to turn it off.</li>
 </ul>
 
 <h2 id="trouble">Troubleshooting</h2>
@@ -217,11 +254,15 @@ WHEN Now Playing Info  Details Available
   <tr><td>Status: &ldquo;Not configured&rdquo;</td><td>Enter a source, or set Use Control4 Room Media = On.</td></tr>
   <tr><td>Status: &ldquo;Roku ECP access denied (HTTP 403)&rdquo;</td><td>On the Roku set Control by mobile apps &rsaquo; Network access = Default/Permissive.</td></tr>
   <tr><td>Status: &ldquo;Roku unreachable&rdquo; / &ldquo;bridge: &hellip;&rdquo;</td><td>IP address changed? Use DHCP reservations. Is the bridge running (<code>http://&lt;bridge&gt;:8765/v1/health</code>)?</td></tr>
+  <tr><td>Apple TV Driver Status: &ldquo;&hellip; has no NOW_PLAYING_* variables&rdquo;</td><td>Update the Apple TV driver to SmartBuildOS Apple TV Native Beta 120 or later. If the device named is a child (Media Player / Apps &amp; Search / App Switcher) and no main device was found, enter the main device&rsquo;s id in <b>Apple TV Driver Device ID</b>.</td></tr>
+  <tr><td>Apple TV Driver Status: &ldquo;Ambiguous: 2 Apple TV drivers &hellip;&rdquo;</td><td>Several Apple TV drivers and the selection belongs to none of them: select the right one again or enter its main device id in <b>Apple TV Driver Device ID</b>.</td></tr>
+  <tr><td>Apple TV Driver Status: &ldquo;Device N not found&rdquo;</td><td>The selected Apple TV driver was deleted or re-added: select it again.</td></tr>
+  <tr><td>Apple TV connected but nothing shows</td><td>Status ends with &ldquo;nothing playing (VALID=0)&rdquo;: the Apple TV driver reports nothing (check that driver). The app may publish no metadata; run <b>Test Metadata Sources</b> and look at the title / state it prints.</td></tr>
   <tr><td>Home Assistant 401</td><td>Create a new long-lived token; HA may temporarily ban an IP after failed logins.</td></tr>
   <tr><td>No posters / synopsis</td><td>Run <b>Test Metadata Sources</b>; check the TMDB key and that the controller can reach the internet.</td></tr>
   <tr><td>Wrong movie matched</td><td>Run <b>Clear Metadata Cache</b>; very generic titles may match the wrong film. Send us <b>Print State</b> output.</td></tr>
   <tr><td>Button missing in Navigator</td><td>Make it visible under the room&rsquo;s Watch/Listen menus and refresh Navigators.</td></tr>
-  <tr><td>Page shows &ldquo;reconnecting&rdquo;</td><td>The Navigator did not get data; check the driver is running (Status) and refresh Navigators.</td></tr>
+  <tr><td>Page shows &ldquo;reconnecting&rdquo; / stays on &ldquo;Connecting&rdquo;</td><td>Neither the Navigator nor the LAN relay delivered data. Check the driver is running (Status), that <b>LAN URL</b> shows an address (not an error), that the touch screen can reach the controller on the LAN Web Port (firewall / VLAN), and refresh Navigators. After a controller reboot allow about a minute for the button URL to be re-sent.</td></tr>
   <tr><td>Anything else</td><td>Set Debug Mode = Print, reproduce, and send the Lua output (keys are redacted).</td></tr>
 </table>
 

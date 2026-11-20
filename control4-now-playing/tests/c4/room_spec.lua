@@ -89,3 +89,65 @@ describe("c4.room playback mapping", function()
     T.eq(Room.to_playback({ [V.POWER] = "0", [V.MEDIA_INFO] = "<x><TITLE>T</TITLE></x>" }).playback.state, "off")
   end)
 end)
+
+describe("c4.room live captures (tests/fixtures/c4room_*.xml)", function()
+  local V = Room.VAR
+  local LIVE = T.fixture("c4room_mediainfo_live.xml")
+  local SHELL = T.fixture("c4room_current_media_shell.xml")
+  it("parses the verbatim 1031 record: base64 <img>, <deviceid>, <mediatype>", function()
+    T.deep_eq(P(LIVE), { title = "Beni", artist = "Gabel", album = "BeNi",
+      image = "http://192.168.1.103:1400/getaa?s=1", device_id = 83, media_type = "song" })
+  end)
+  it("XML-entity-escaped production text is unescaped once", function()
+    local i = P("<mediainfo><mediatype>SONG</mediatype><artist>K-dilak</artist><title>Mesaje a &amp; Bedjine</title></mediainfo>")
+    T.eq(i.title, "Mesaje a & Bedjine")
+  end)
+  it("the CURRENT_MEDIA (1005) empty shell is no info", function()
+    T.is_nil(P(SHELL))
+    T.is_nil(Room.media_info({ [V.MEDIA] = SHELL, [V.MEDIA_INFO] = "" }))
+    T.eq(Room.to_playback({ [V.POWER] = "1", [V.MEDIA] = SHELL, [V.MEDIA_INFO] = "" }).playback.state, "idle")
+  end)
+  it("1031 wins over 1005; 1005 is used when 1031 is empty", function()
+    T.eq(Room.media_info({ [V.MEDIA] = SHELL, [V.MEDIA_INFO] = LIVE }).title, "Beni")
+    local pb = Room.to_playback({ [V.POWER] = "1", [V.MEDIA_INFO] = "", [V.MEDIA] = LIVE })
+    T.eq(pb.playback.state, "playing"); T.eq(pb.media.title, "Beni")
+  end)
+  it("mediatype -> kind: SONG music, MOVIE movie, VIDEO video, other types unknown, none -> heuristic", function()
+    T.eq(Room.kind_of("SONG"), "music"); T.eq(Room.kind_of("song"), "music"); T.eq(Room.kind_of("Track"), "music")
+    T.eq(Room.kind_of("MOVIE"), "movie"); T.eq(Room.kind_of("VIDEO"), "video")
+    T.eq(Room.kind_of("STATION"), "unknown"); T.eq(Room.kind_of("whatever"), "unknown")
+    T.is_nil(Room.kind_of(nil)); T.is_nil(Room.kind_of(""))
+    local function kind(x) return Room.to_playback({ [V.POWER] = "1", [V.MEDIA_INFO] = x }).media.kind end
+    T.eq(kind("<m><mediatype>MOVIE</mediatype><title>Heat</title></m>"), "movie")
+    T.eq(kind("<m><mediatype>STATION</mediatype><title>KQED</title><artist>NPR</artist></m>"), "unknown")
+    T.eq(kind("<m><title>T</title><artist>A</artist></m>"), "music")
+  end)
+  it("valid_device: 0, empty, -1 and 4294967295 mean none", function()
+    T.eq(Room.valid_device("83"), 83)
+    for _, v in ipairs({ "0", "", "4294967295", "-1", "x" }) do T.is_nil(Room.valid_device(v), v) end
+    T.is_nil(Room.valid_device(nil))
+  end)
+  it("is_on without POWER_STATE: a <deviceid> or PLAYING_AUDIO_DEVICE means on; 4294967295 selected is not a device", function()
+    T.eq(Room.is_on({ [V.SELECTED] = "0", [V.MEDIA_INFO] = LIVE }), true)
+    T.eq(Room.is_on({ [V.SELECTED] = "0", [V.PLAYING_AUDIO] = "83" }), true)
+    T.eq(Room.is_on({ [V.SELECTED] = "4294967295" }), false)
+    T.eq(Room.is_on({ [V.SELECTED] = "0", [V.MEDIA] = SHELL }), false)
+  end)
+  it("POWER_STATE: 1/true/on (any case) on, 0/false/off off", function()
+    for _, v in ipairs({ "1", "true", "TRUE", "True", "on", "ON", "On", " on " }) do T.eq(Room.is_on({ [V.POWER] = v }), true, v) end
+    for _, v in ipairs({ "0", "false", "FALSE", "off", "OFF", "Off" }) do
+      T.eq(Room.is_on({ [V.POWER] = v, [V.SELECTED] = "12" }), false, v)
+    end
+  end)
+  it("watcher: source device name from <deviceid> when CURRENT_SELECTED_DEVICE is 0 / 4294967295", function()
+    local C4 = { GetDeviceDisplayName = function(_, id) return ({ [83] = "Kitchen Sonos", [12] = "Den TV" })[id] end }
+    local r = Room.new(C4, { log = function() end, now = function() return 0 end })
+    r.watching, r.room_id = true, 1
+    r.snap = { [V.SELECTED] = "0", [V.MEDIA_INFO] = LIVE }
+    T.eq(r:device_name(), "Kitchen Sonos")
+    r.snap[V.SELECTED] = "4294967295"
+    T.eq(r:device_name(), "Kitchen Sonos")
+    r.snap[V.SELECTED] = "12"
+    T.eq(r:device_name(), "Den TV", "a real selected device still wins")
+  end)
+end)

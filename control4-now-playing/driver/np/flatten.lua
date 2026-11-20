@@ -6,12 +6,23 @@ np.flatten -- state document -> ordered list of Control4 variables.
       `now` (optional) extrapolates POSITION_SECONDS / PROGRESS_PERCENT while playing.
   flatten.definitions()     -> { {name=, type=}, ... } in the same order (for C4:AddVariable)
   flatten.display_lines(state) -> line1, line2
-  flatten.position(state, now) -> extrapolated position seconds | nil
+  flatten.position(state, now) -> extrapolated position seconds | nil, stale (bool)
+
+Progress extrapolation (the same rule as the page's tick()): position_s is the position at the
+source's last observation (position_updated_at). Only while the state is "playing" is it advanced
+by (now - position_updated_at); never while paused / buffering (seeking) / stopped / idle / off,
+and never without position_updated_at. It is an ESTIMATE, bounded so a source that stopped
+reporting never shows a confidently advancing clock:
+  * it never passes the duration (held at the duration, for non-live media);
+  * it advances at most MAX_EXTRAPOLATE_S (4 h) past the observation, then stops.
+In both cases `stale` is true (the page shows the bar frozen / indeterminate).
 ]]
 
 local util = require("np.util")
 
 local M = {}
+
+M.MAX_EXTRAPOLATE_S = 4 * 3600
 
 local DEFS = {
   { "TITLE", "STRING" }, { "SUBTITLE", "STRING" }, { "MEDIA_KIND", "STRING" }, { "SERIES_TITLE", "STRING" },
@@ -42,12 +53,17 @@ end
 function M.position(state, now)
   local pb = state and state.playback or {}
   local pos = tonumber(pb.position_s)
-  if not pos then return nil end
-  if now and pb.state == "playing" and pb.position_updated_at then
-    pos = pos + math.max(0, now - pb.position_updated_at)
-    if pb.duration_s and not pb.is_live and pos > pb.duration_s then pos = pb.duration_s end
+  if not pos then return nil, false end
+  local stale = false
+  local at = tonumber(pb.position_updated_at)
+  if now and pb.state == "playing" and at then
+    local dt = math.max(0, now - at)
+    if dt > M.MAX_EXTRAPOLATE_S then dt, stale = M.MAX_EXTRAPOLATE_S, true end
+    pos = pos + dt
+    local dur = tonumber(pb.duration_s)
+    if dur and dur > 0 and not pb.is_live and pos >= dur then pos, stale = dur, dt > 0 or stale end
   end
-  return pos
+  return pos, stale
 end
 
 local function title_of(state)
@@ -110,7 +126,7 @@ function M.flatten(state, now)
   local m, src, pb = state.media or {}, state.source or {}, state.playback or {}
   local d = state.details or {}
   local ratings, ids, links, crew = d.ratings or {}, d.ids or {}, d.links or {}, d.crew or {}
-  local pos = M.position(state, now)
+  local pos = M.position(state, now) -- (first value only)
   local dur = tonumber(pb.duration_s)
   local progress = 0
   if pos and dur and dur > 0 and not pb.is_live then
