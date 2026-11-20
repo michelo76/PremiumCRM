@@ -17,7 +17,7 @@ end
 
 local LUA_FILES = { "driver.lua", "c4/app.lua", "c4/config.lua", "c4/deps.lua", "c4/events.lua", "c4/room.lua",
   "c4/artwork.lua", "c4/httpserver.lua", "c4/status.lua", "c4/diagnostics.lua", "c4/variables.lua",
-  "c4/version.lua", "c4/b64.lua" }
+  "c4/version.lua", "c4/b64.lua", "c4/appletv.lua" }
 
 local function all_lua()
   local parts = {}
@@ -95,7 +95,8 @@ describe("driver.xml", function()
     end
   end)
   it("read-only status properties are marked readonly", function()
-    for _, n in ipairs({ "Driver Version", "Status", "Active Source", "Metadata Sources", "Web View URL", "LAN URL" }) do
+    for _, n in ipairs({ "Driver Version", "Status", "Active Source", "Metadata Sources", "Web View URL", "LAN URL",
+      "Apple TV Driver Status" }) do
       T.ok(xml.properties[n] and xml.properties[n].readonly, n)
     end
   end)

@@ -13,6 +13,16 @@ A faithful-enough mock of the Control4 DriverWorks Lua API for driving driver.lu
   m:prop(name, value)           -- set a property and call OnPropertyChanged
   m:device(id, name, vars)      -- define a device (rooms: ids from m.room_id)
   m:set_var(dev, var, value)    -- change a device variable (fires listeners)
+  m:dyn_device(id, name, values, opts)  -- a foreign driver's device whose variables are registered
+                                --   dynamically: values = { NAME = "v" }, ids from opts.base (default
+                                --   1001) in sorted-name order; opts.c4i (GetDevicesByC4iName /
+                                --   GetDevices), opts.proxies = { ids } (its proxy devices)
+  m:proxy_device(id, name, protocol_id, c4i)   -- a child proxy of protocol_id (no contract vars)
+  m:set_named(dev, NAME, value) -- change a dyn_device variable by name (fires listeners)
+  m:set_named_many(dev, { NAME = v, ... }, order)  -- several, in `order` (listeners per write)
+  m:renumber(dev, base)         -- the foreign driver reloaded: same names, new variable ids
+  m.gdv_shape = "by_name"       -- GetDeviceVariables returns {[NAME]={value=}} (no ids)
+  m.on_get_var = fn(dev, var)   -- called before every GetDeviceVariable (torn-read tests)
   m:connect(h) / m:client_send(h, data) / m:client_close(h)   -- LAN server clients
                                 --   (OnServerDataIn / ...StatusChanged get the client address,
                                 --   port and the CreateServer identifier appended, OS 3.3.1+)
@@ -102,6 +112,7 @@ M.FORBIDDEN_IN_INIT = {
   SetVariable = true, SetTimer = true, JsonEncode = true, JsonDecode = true, RoomGetId = true,
   GetDeviceVariable = true, CreateServer = true, FireEvent = true, GetControllerNetworkAddress = true,
   RegisterVariableListener = true, url = true, SendToProxy = true, SendDataToUI = true,
+  GetDeviceVariables = true, GetDevices = true,
 }
 
 function M.new(opts)
@@ -240,6 +251,63 @@ function Mock:set_var(dev, var, value)
   end
 end
 
+function Mock:dyn_device(id, name, values, opts)
+  opts = opts or {}
+  local d = { name = name, vars = {}, var_ids = {}, c4i = opts.c4i, proxies = opts.proxies }
+  self.devices[id] = d
+  local names = {}
+  for k in pairs(values or {}) do names[#names + 1] = k end
+  table.sort(names)
+  local next_id = opts.base or 1001
+  for _, n in ipairs(names) do
+    d.var_ids[n] = next_id
+    d.vars[next_id] = tostring(values[n])
+    next_id = next_id + 1
+  end
+  for _, p in ipairs(opts.proxies or {}) do
+    if self.devices[p] then self.devices[p].protocol = id end
+  end
+  return d
+end
+
+function Mock:proxy_device(id, name, protocol_id, c4i)
+  self.devices[id] = { name = name, vars = { [1000] = "0" }, protocol = protocol_id, c4i = c4i }
+  local p = self.devices[protocol_id]
+  if p then
+    p.proxies = p.proxies or {}
+    local known = false
+    for _, x in ipairs(p.proxies) do if x == id then known = true end end
+    if not known then p.proxies[#p.proxies + 1] = id end
+  end
+end
+
+function Mock:var_id(dev, name) return self.devices[dev].var_ids[name] end
+
+function Mock:set_named(dev, name, value)
+  local id = assert(self.devices[dev].var_ids[name], "no variable " .. tostring(name))
+  self:set_var(dev, id, tostring(value))
+end
+
+function Mock:set_named_many(dev, values, order)
+  for _, n in ipairs(order) do
+    if values[n] ~= nil then self:set_named(dev, n, values[n]) end
+  end
+end
+
+function Mock:renumber(dev, base)
+  local d = self.devices[dev]
+  local names = {}
+  for n in pairs(d.var_ids) do names[#names + 1] = n end
+  table.sort(names)
+  local vals = {}
+  for _, n in ipairs(names) do vals[n] = d.vars[d.var_ids[n]] end
+  d.vars, d.var_ids = {}, {}
+  for i, n in ipairs(names) do
+    d.var_ids[n] = base + i - 1
+    d.vars[base + i - 1] = vals[n]
+  end
+end
+
 -- server --------------------------------------------------------------------
 
 M.CLIENT_ADDR = "192.168.1.77"
@@ -341,7 +409,68 @@ function Mock:_build_c4()
   function C4:RoomGetId() m:_check("RoomGetId"); return m.room_id end
   function C4:GetDevicesByC4iName(c4i)
     if c4i == "roomdevice.c4i" then return { [m.room_id] = m.devices[m.room_id].name } end
-    return {}
+    local out = {}
+    for id, d in pairs(m.devices) do
+      if d.c4i == c4i and not d.protocol then out[id] = d.name end
+    end
+    return out
+  end
+  -- GetDevices({DeviceIds="1,2"} | {C4iNames="a.c4z,b.c4i"}): a proxy's entry carries a
+  -- `protocol` sub-table, a protocol driver's a `proxies` sub-table (Snap One API reference).
+  function C4:GetDevices(filter)
+    m:_check("GetDevices")
+    filter = filter or {}
+    local want_ids, want_names = nil, nil
+    if filter.DeviceIds then
+      want_ids = {}
+      for n in tostring(filter.DeviceIds):gmatch("%d+") do want_ids[tonumber(n)] = true end
+    end
+    local names = filter.C4iNames or filter.c4iNames
+    if names then
+      want_names = {}
+      for n in tostring(names):gmatch("[^,%s]+") do want_names[n] = true end
+    end
+    local out = {}
+    for id, d in pairs(m.devices) do
+      if (not want_ids or want_ids[id]) and (not want_names or want_names[d.c4i or ""]) then
+        local e = { deviceName = d.name, driverFileName = d.c4i or "unknown.c4i", roomId = tostring(m.room_id),
+          roomName = m.devices[m.room_id].name }
+        if d.protocol then
+          local p = m.devices[d.protocol]
+          e.protocol = { [d.protocol] = { deviceName = p and p.name, driverFileName = p and p.c4i } }
+        end
+        if d.proxies then
+          e.proxies = {}
+          for _, pid in ipairs(d.proxies) do
+            local p = m.devices[pid]
+            e.proxies[pid] = { deviceName = p and p.name, driverFileName = "proxy.c4i" }
+          end
+        end
+        out[id] = e
+      end
+    end
+    return out
+  end
+  function C4:GetProxyDevicesById(id)
+    local d = m.devices[tonumber(id)]
+    if not d or not d.proxies then return nil end
+    return unpack(d.proxies)
+  end
+  -- {[varId] = {name =, value =}} (the shape the Snap One variable_parser sample relies on)
+  function C4:GetDeviceVariables(id)
+    m:_check("GetDeviceVariables")
+    local d = m.devices[tonumber(id)]
+    if not d then return nil end
+    local out = {}
+    if d.var_ids then
+      for name, vid in pairs(d.var_ids) do
+        if m.gdv_shape == "by_name" then out[name] = { value = d.vars[vid] }
+        else out[vid] = { name = name, value = d.vars[vid] } end
+      end
+    else
+      for vid, v in pairs(d.vars) do out[vid] = { name = "VAR" .. vid, value = v } end
+    end
+    return out
   end
   function C4:GetDeviceDisplayName(id)
     local d = m.devices[tonumber(id)]
@@ -349,6 +478,7 @@ function Mock:_build_c4()
   end
   function C4:GetDeviceVariable(dev, var)
     m:_check("GetDeviceVariable")
+    if m.on_get_var then m.on_get_var(tonumber(dev), tonumber(var)) end
     local d = m.devices[tonumber(dev)]
     return d and d.vars[tonumber(var)] or nil
   end

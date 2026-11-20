@@ -14,12 +14,12 @@ local flatten = require("np.flatten")
 
 local M = {}
 
-M.NOT_CONFIGURED = "Not configured: set a Roku Address, an Apple TV bridge + device, a Home Assistant " ..
-  "URL/token/entity, or turn Use Control4 Room Media On"
+M.NOT_CONFIGURED = "Not configured: set a Roku Address, select the Apple TV Driver (or an Apple TV bridge + " ..
+  "device), a Home Assistant URL/token/entity, or turn Use Control4 Room Media On"
 
 local LABELS = {
   roku = "Roku", appletv = "Apple TV", homeassistant = "Home Assistant", c4room = "Control4 Room",
-  bridge = "Apple TV",
+  bridge = "Apple TV", appletv_driver = "Apple TV (driver)",
 }
 
 local STATE_WORDS = {

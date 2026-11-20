@@ -70,7 +70,7 @@ check(m:proxy_cmds("URL_CHANGED")[1].params.url:find("?relay=http%3A%2F%2F192.16
 -- stamped by the build
 local ver = require("c4.version")
 check(ver.BUILD_DATE ~= "dev", "version.lua BUILD_DATE stamped (" .. ver.BUILD_DATE .. ")")
-check(m.xml.version == "10100", "driver.xml <version> stamped (" .. tostring(m.xml.version) .. ")")
+check(m.xml.version == "10200", "driver.xml <version> stamped (" .. tostring(m.xml.version) .. ")")
 check(m.updated_props["Driver Version"] == ver.string(), "Driver Version property = " .. tostring(m.updated_props["Driver Version"]))
 
 m:destroy()

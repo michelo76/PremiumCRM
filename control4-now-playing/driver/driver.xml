@@ -7,7 +7,7 @@
   <model>Now Playing Info</model>
   <created>11/11/2026 12:00</created>
   <modified>11/11/2026 12:00</modified>
-  <version>10100</version>
+  <version>10200</version>
   <control>lua_gen</control>
   <controlmethod>IP</controlmethod>
   <driver>DriverWorks</driver>
@@ -120,6 +120,38 @@
       <property><name>Roku Settings</name><type>LABEL</type><default>Roku</default></property>
       <property><name>Roku Address</name><type>STRING</type><default></default><readonly>false</readonly></property>
       <property><name>Roku Name</name><type>STRING</type><default></default><readonly>false</readonly></property>
+
+      <property><name>Apple TV Driver Settings</name><type>LABEL</type><default>Apple TV (SmartBuildOS driver)</default></property>
+      <property>
+        <name>Apple TV Driver</name>
+        <type>DEVICE_SELECTOR</type>
+        <items><item>smartbuildos_appletv_native.c4z</item></items>
+        <multiselect>false</multiselect>
+        <default></default>
+        <readonly>false</readonly>
+        <description>The SmartBuildOS Apple TV Native driver (Beta 120 or later) in this project. Now playing is read from its NOW_PLAYING_* variables: no pairing, no bridge.</description>
+      </property>
+      <property>
+        <name>Apple TV Driver Device ID</name>
+        <type>STRING</type>
+        <default></default>
+        <readonly>false</readonly>
+        <description>Optional: the numeric device id of the Apple TV driver's main device. Use it when the selector picks a child proxy (Media Player / Apps &amp; Search / App Switcher) or does not list the driver. Overrides Apple TV Driver.</description>
+      </property>
+      <property>
+        <name>Apple TV Name</name>
+        <type>STRING</type>
+        <default></default>
+        <readonly>false</readonly>
+        <description>Optional display name for this Apple TV (default: the Apple TV driver's device name).</description>
+      </property>
+      <property>
+        <name>Apple TV Driver Status</name>
+        <type>STRING</type>
+        <default>Not configured</default>
+        <readonly>true</readonly>
+        <description>Which Apple TV driver device is read and its current snapshot revision, or why it cannot be read.</description>
+      </property>
 
       <property><name>Apple TV Settings</name><type>LABEL</type><default>Apple TV (companion bridge)</default></property>
       <property><name>Apple TV Bridge URL</name><type>STRING</type><default></default><readonly>false</readonly></property>

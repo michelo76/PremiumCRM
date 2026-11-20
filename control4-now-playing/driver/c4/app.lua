@@ -33,6 +33,7 @@ local Deps = require("c4.deps")
 local Config = require("c4.config")
 local Events = require("c4.events")
 local Room = require("c4.room")
+local AppleTV = require("c4.appletv")
 local Artwork = require("c4.artwork")
 local Server = require("c4.httpserver")
 local Status = require("c4.status")
@@ -57,7 +58,7 @@ M.ARTWORK_CMD = "NOW_PLAYING_ARTWORK"
 
 M.READ_ONLY = {
   ["Driver Version"] = true, ["Status"] = true, ["Active Source"] = true, ["Metadata Sources"] = true,
-  ["Web View URL"] = true, ["LAN URL"] = true,
+  ["Web View URL"] = true, ["LAN URL"] = true, ["Apple TV Driver Status"] = true,
 }
 
 -- '{' -> '{"sent_at":N,' : the page corrects controller/device clock skew with it.
@@ -228,6 +229,7 @@ function App:on_late_init(dit)
   })
   local deps = self.deps
   self.room = Room.new(C4, deps, function(_, var) self:_room_changed(var) end)
+  self.atv = AppleTV.new(C4, deps, function() self:_atv_changed() end)
   self.artwork = Artwork.new(deps)
   self.token = self:_lan_token()
   self.server = Server.new(C4, deps, {
@@ -257,6 +259,7 @@ function App:on_destroyed(dit)
   end
   for k in pairs(self.timers) do self:_cancel(k) end
   if self.room then self.room:unwatch() end
+  if self.atv then self.atv:stop() end
   if self.server then self.server:stop() end
   if self.artwork then self.artwork:clear() end
 end
@@ -293,6 +296,9 @@ function App:_build_config()
   else
     self.room:unwatch()
   end
+  -- the SmartBuildOS Apple TV driver (idempotent: same selection = same listener)
+  self.atv:configure(info.appletv_driver)
+  self:_update_prop("Apple TV Driver Status", self.atv:status_text())
   return cfg, info
 end
 
@@ -318,6 +324,7 @@ function App:_configure(reason)
     end
     if info.configured then
       if info.room_media or info.gated then self:_push_room() end
+      if info.appletv_driver then self:_push_atv() end
       if not self.engine.running then self.engine:start() end
     else
       if self.engine.running then self.engine:stop() end
@@ -340,6 +347,19 @@ end
 function App:_push_room()
   if not (self.engine and self.room and self.room.watching) then return end
   self.engine:push(Config.ROOM_PROVIDER_ID, self.room:playback())
+end
+
+-- the Apple TV driver watcher read a new snapshot (or its status changed)
+function App:_push_atv()
+  if not (self.engine and self.atv) then return end
+  self.engine:push(Config.APPLETV_DRIVER_ID, self.atv:playback()) -- false while gated: no provider
+end
+
+function App:_atv_changed()
+  if self.destroyed then return end
+  self:_update_prop("Apple TV Driver Status", self.atv:status_text())
+  if self.configuring or not self.engine then return end
+  if self.info and self.info.appletv_driver then self:_push_atv() end
 end
 
 function App:_room_changed(var)
@@ -638,7 +658,8 @@ function App:received_from_proxy(binding, cmd, params)
 end
 
 function App:on_watched_variable_changed(dev, var, value)
-  if self.room then self.room:on_variable(dev, var, value) end
+  if self.room and self.room:on_variable(dev, var, value) then return end
+  if self.atv then self.atv:on_variable(dev, var, value) end
 end
 
 function App:on_server_data_in(h, data, address, port, identifier)
@@ -655,6 +676,12 @@ end
 
 function App:_action_refresh()
   if self.info and (self.info.room_media or self.info.gated) then self:_push_room() end
+  -- also the target of the Apple TV driver's event 19 "Now Playing snapshot updated" (dealer
+  -- programming): re-read its snapshot now, even when REVISION looks unchanged
+  if self.info and self.info.appletv_driver and self.atv then
+    self.atv:read("refresh", true)
+    self:_push_atv()
+  end
   if self.engine.running then self.engine:refresh() end
   self:_out("Now Playing Info: refresh requested")
 end
@@ -698,8 +725,16 @@ end
 
 function App:_action_test()
   local out = function(line) self:_out(line) end
+  local atv_bad = 0
+  if self.info and self.info.appletv_driver and self.atv then
+    local lines, ok = self.atv:report()
+    out("Test Metadata Sources: Apple TV driver (local variables)")
+    for _, l in ipairs(lines) do out(l) end
+    if not ok then atv_bad = 1 end
+    self:_update_prop("Apple TV Driver Status", self.atv:status_text())
+  end
   Diag.run(self.cfg or {}, self.deps, out, function(results)
-    local bad = 0
+    local bad = atv_bad
     for _, r in pairs(results) do if not r.ok then bad = bad + 1 end end
     out("Test Metadata Sources: done, " .. bad .. " problem(s)")
   end)
