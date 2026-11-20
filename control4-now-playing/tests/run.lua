@@ -20,7 +20,7 @@ local SPECS = {
   "pipeline_spec", "schema_spec", "flatten_spec", "engine_spec",
   -- Control4 glue (tests/c4/): pure modules, then the real driver.lua against the C4 mock
   "c4/static_spec", "c4/config_spec", "c4/events_spec", "c4/room_spec", "c4/artwork_spec",
-  "c4/httpserver_spec", "c4/status_spec", "c4/driver_spec",
+  "c4/httpserver_spec", "c4/status_spec", "c4/driver_spec", "c4/appletv_spec",
 }
 
 local verbose = false

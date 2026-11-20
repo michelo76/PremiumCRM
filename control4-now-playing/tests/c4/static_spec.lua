@@ -100,6 +100,18 @@ describe("driver.xml", function()
       T.ok(xml.properties[n] and xml.properties[n].readonly, n)
     end
   end)
+  it("DEVICE_SELECTOR properties carry an <items> filter (Composer: 'Property Invalid' without one)", function()
+    local n = 0
+    for name, p in pairs(xml.properties) do
+      if p.type == "DEVICE_SELECTOR" then
+        n = n + 1
+        T.ok(#p.items > 0, name .. " has no <items>")
+      end
+    end
+    T.ok(n >= 1)
+    T.deep_eq(xml.properties["Apple TV Driver"].items, { "smartbuildos_appletv_native.c4z" })
+    T.eq(xml.properties["Apple TV Driver Device ID"].type, "STRING")
+  end)
   it("password properties", function()
     for _, n in ipairs({ "Apple TV Bridge Token", "Home Assistant Token", "TMDB API Key", "OMDb API Key", "Gracenote API Key" }) do
       T.ok(xml.properties[n].password, n)

@@ -23,10 +23,12 @@ The contract (from the Apple TV driver's author):
 
 Receiver rules implemented here: read the snapshot when connecting; re-read on every REVISION
 change (variable listener) and on Refresh; read REVISION before and after the fields and retry
-when it moved (MAX_TRIES, then the latest read is accepted and logged); VALID=0 clears what is
-shown; a REVISION lower than the last applied one is a driver restart (variable ids may have
-changed: the name map is rebuilt and the listener re-registered). A safety poll (POLL_S) rebuilds
-the name map and re-reads REVISION in case a notification was missed or the ids moved.
+when it moved (MAX_TRIES; a read that never settles is NOT published -- it is retried RETRY_S
+later, and the next REVISION notification triggers a read anyway); VALID=0 clears what is shown; a
+REVISION lower than the last applied one is a driver restart (variable ids may have changed: the
+name map is rebuilt and the listener re-registered). A failed or implausible read (REVISION not a
+number, VALID not 0/1: a stale name map) also rebuilds the map once. A safety poll (POLL_S)
+rebuilds the name map and re-reads REVISION in case a notification was missed or the ids moved.
 
 Staleness: when the Apple TV driver stops updating while VALID=1 we cannot tell (a paused movie
 legitimately produces no updates), so the last snapshot stays until it is cleared or replaced.
@@ -38,25 +40,32 @@ Pure helpers
   AppleTV.var_map(vars)    -> { [NAME] = id | true }  (C4:GetDeviceVariables result, any shape)
   AppleTV.app_name(name, id) -> display name for the app
   AppleTV.ids(v)           -> list of device ids from a GetDevicesByC4iName-style table
+  AppleTV.plausible(snap)  -> ok, why   (VALID is 0/1/"", UPDATED_AT numeric/"")
 Watcher (C4 injected)
   local w = AppleTV.new(C4, deps, on_change)      on_change(watcher) after each applied snapshot
                                                    or status change
   w:configure({ selected = n, override = n, name = "..." } | nil)   (idempotent)
   w:stop()
   w:on_variable(idDevice, idVariable, strValue) -> true when handled
-  w:read(reason, force)   re-read now (force: re-apply even when REVISION is unchanged)
+  w:read(reason, force)   re-read now (force: re-apply even when REVISION is unchanged); never
+                          re-entrant (a read requested during a read runs right after it)
   w:playback()            the current playback (an "off" playback while nothing is resolved)
   w:status_text()         for the read-only "Apple TV Driver Status" property
   w:report()              lines + ok for "Test Metadata Sources"
 
 C4 APIs (Snap One DriverWorks API reference, docs-driverworks-api):
-  required  C4:GetDeviceVariables(id)        22_miscellaneous/_12 (2.8.0): {[varId]={name=,value=}}
-                                              (shape as used by the variable_parser sample driver)
+  required  C4:GetDeviceVariables(id)        22_miscellaneous/_12 (2.8.0): "all of the variables ... as
+                                              well as all of the information for each"; the exact
+                                              table shape is NOT documented: var_map() accepts
+                                              {[varId]={name=,value=}} (expected), {[i]={id=,name=}},
+                                              {[NAME]={id=|value=}} and {[NAME]=value}
             C4:GetDeviceVariable(dev, varId) / C4:RegisterVariableListener / UnregisterVariableListener
             C4:GetDeviceDisplayName(id)
+            (all calls go through W:_call: a missing API or an error is "not available")
   optional  C4:GetDevicesByC4iName(c4z)      25_proxy/_4 (1.6.0): table of device ids
-  (guarded) C4:GetDevices({DeviceIds=...})   22_miscellaneous/_9 (2.10.0): a proxy's entry carries a
-                                              `protocol` sub-table, a protocol driver's a `proxies` one
+  (guarded) C4:GetDevices({DeviceIds=...} | {C4iNames=...})   22_miscellaneous/_9 (2.10.0): a
+                                              proxy's entry carries a `protocol` sub-table, a
+                                              protocol driver's a `proxies` one
             C4:GetProxyDevicesById(id)       25_proxy/_2 (1.6.0): the proxies of a device
 ]]
 
@@ -100,12 +109,12 @@ local function s(v)
 end
 
 local function count(v)
-  -- season / episode numbers: plain non-negative integers only ("S2", "2a", "" -> nil); 0 -> nil
-  -- (a missing number written as "0" must not turn every title into an episode)
+  -- season / episode numbers: tonumber of a plain non-negative integer ("2", "02", "2.0");
+  -- anything else ("S2", "2a", "2.5", "") -> nil. Season 0 (specials) is a real number.
   v = s(v)
   if not v or not v:find("^%d+%.?0*$") then return nil end
   local n = tonumber(v)
-  if not n or n <= 0 then return nil end
+  if not n or n < 0 then return nil end
   return math.floor(n)
 end
 
@@ -176,7 +185,7 @@ function M.to_playback(snap, opts)
   pb.source.app_name = M.app_name(snap.APP_NAME, app_id)
   pb.source.app_id = app_id
   pb.playback = { state = state, position_s = position, duration_s = duration,
-    position_updated_at = updated or now, is_live = is_live }
+    position_updated_at = updated, is_live = is_live }
   pb.media = {
     kind = kind, title = title, subtitle = subtitle, series_title = series, season = season, episode = episode,
     episode_title = kind == "episode" and title or nil, artist = artist, album = album, genres = {},
@@ -186,8 +195,8 @@ function M.to_playback(snap, opts)
 end
 
 -- C4:GetDeviceVariables(id) -> { [NAME] = varId } (true when a name has no usable id; values
--- are then read from the whole table). Accepted shapes: {[id]={name=,value=}} (documented /
--- sample drivers), {[i]={id=,name=}}, {[name]={id=,value=}}, {[name]=value}.
+-- are then read from the whole table). The shape is undocumented; accepted: {[id]={name=,value=}}
+-- (expected), {[i]={id=,name=}}, {[name]={id=,value=}}, {[name]=value}.
 function M.var_map(vars)
   local map = {}
   if type(vars) ~= "table" then return map end
@@ -242,6 +251,21 @@ function M.ids(v)
   return out
 end
 
+
+-- a value of NOW_PLAYING_REVISION / _UPDATED_AT: a plain non-negative integer string
+local function is_int_str(v) return type(v) == "string" and v:find("^%s*%d+%s*$") ~= nil end
+
+-- Cheap sanity check of a snapshot read through the name map: when the Apple TV driver reloads,
+-- its variable ids can be reassigned and a stale map then reads other variables. VALID is always
+-- "0"/"1" and UPDATED_AT a number (or "" when unset); anything else means the map is wrong.
+function M.plausible(snap)
+  local v = s(snap.VALID)
+  if v ~= nil and v ~= "0" and v ~= "1" then return false, "NOW_PLAYING_VALID = " .. tostring(snap.VALID) end
+  local u = s(snap.UPDATED_AT)
+  if u ~= nil and not tonumber(u) then return false, "NOW_PLAYING_UPDATED_AT = " .. tostring(snap.UPDATED_AT) end
+  return true
+end
+
 ---------------------------------------------------------------------------
 -- watcher
 ---------------------------------------------------------------------------
@@ -249,12 +273,16 @@ end
 local W = {}
 W.__index = W
 
+M.RETRY_S = 1 -- a read torn MAX_TRIES times in a row is retried this much later
+
 function M.new(C4, deps, on_change)
-  return setmetatable({ C4 = C4, deps = deps, on_change = on_change, status = "Not configured" }, W)
+  return setmetatable({ C4 = C4, deps = deps, on_change = on_change, status = "Not configured", restarts = 0 }, W)
 end
 
 function W:_log(level, msg) self.deps.log(level, "Apple TV driver: " .. msg) end
 
+-- every C4 call goes through here: a missing (older OS) or failing API is "not available",
+-- never an error in our driver
 function W:_call(name, ...)
   local f = self.C4[name]
   if type(f) ~= "function" then return false, "C4:" .. name .. " not available" end
@@ -281,36 +309,57 @@ function W:_contract_map(id)
   return nil
 end
 
--- every SmartBuildOS Apple TV driver device in the project
+-- every SmartBuildOS Apple TV driver (main) device in the project:
+-- C4:GetDevicesByC4iName and C4:GetDevices({C4iNames=}) (both optional, results merged;
+-- GetDevices entries carrying a `protocol` sub-table are proxies and skipped)
 function W:_installed()
+  local out, seen = {}, {}
   local ok, v = self:_call("GetDevicesByC4iName", M.C4Z)
-  if not ok then return {} end
-  return M.ids(v)
+  if ok then
+    for _, id in ipairs(M.ids(v)) do if not seen[id] then seen[id] = true; out[#out + 1] = id end end
+  end
+  local ok2, t = self:_call("GetDevices", { C4iNames = M.C4Z })
+  if ok2 and type(t) == "table" then
+    for k, e in pairs(t) do
+      local id = tonumber(k)
+      if id and not seen[id] and not (type(e) == "table" and type(e.protocol) == "table") then
+        seen[id] = true; out[#out + 1] = id
+      end
+    end
+  end
+  table.sort(out)
+  return out
 end
 
--- protocol device(s) related to a proxy id and vice versa (optional APIs, all guarded)
+-- devices linked to `id` by C4:GetDevices({DeviceIds=}) (a proxy's `protocol`, a protocol
+-- driver's `proxies`); optional API
 function W:_related(id)
   local rel, seen = {}, {}
-  local function add(n) n = tonumber(n); if n and n ~= id and not seen[n] then seen[n] = true; rel[#rel + 1] = n end end
   local ok, t = self:_call("GetDevices", { DeviceIds = tostring(id) })
   if ok and type(t) == "table" then
     local e = t[id] or t[tostring(id)]
     if type(e) == "table" then
-      for _, key in ipairs({ "protocol", "protocols", "proxies" }) do
-        if type(e[key]) == "table" then for pid in pairs(e[key]) do add(pid) end end
+      for _, key in ipairs({ "protocol", "proxies" }) do
+        if type(e[key]) == "table" then
+          for pid in pairs(e[key]) do
+            local n = tonumber(pid)
+            if n and n ~= id and not seen[n] then seen[n] = true; rel[#rel + 1] = n end
+          end
+        end
       end
     end
   end
+  table.sort(rel)
   return rel
 end
 
--- does main device `dev` own proxy `id`?
+-- does main device `dev` own proxy `id`? (C4:GetProxyDevicesById, C4:GetDevices; both optional)
 function W:_owns(dev, id)
-  local res = { self:_call("GetProxyDevicesById", dev) }
-  if res[1] then
-    for i = 2, #res do
-      for _, p in ipairs(M.ids(res[i])) do if p == id then return true end end
-    end
+  local res = { n = 0 }
+  local function collect(ok, ...) if ok then res = { n = select("#", ...), ... } end end
+  collect(self:_call("GetProxyDevicesById", dev))
+  for i = 1, res.n do
+    for _, p in ipairs(M.ids(res[i])) do if p == id then return true end end
   end
   local ok, t = self:_call("GetDevices", { DeviceIds = tostring(dev) })
   if ok and type(t) == "table" then
@@ -322,7 +371,16 @@ function W:_owns(dev, id)
   return false
 end
 
+local function label(self, id)
+  local n = self:_name_of(id)
+  return "device " .. id .. (n and (" (" .. n .. ")") or "")
+end
+
 -- -> dev, map, how | nil, nil, problem
+-- Order: Apple TV Driver Device ID, then Apple TV Driver (the selector); the first one that
+-- exposes NOW_PLAYING_REVISION wins. Otherwise (a child proxy, or the wrong device) the main
+-- device is looked for: proxy -> protocol links, then the SmartBuildOS drivers installed in the
+-- project. Several candidates and none related to the selection: ambiguous, no guessing.
 function W:_resolve()
   local opts = self.opts or {}
   local tried = {}
@@ -336,8 +394,7 @@ function W:_resolve()
   end
   local first = tried[1]
   if not first then return nil, nil, "Not configured" end
-  -- a child proxy (Media Player / Apps & Search / App Switcher) or another device was given:
-  -- look for the main driver device. 1) documented proxy -> protocol links
+  -- 1) documented proxy -> protocol links of what was given
   for _, id in ipairs(tried) do
     for _, rel in ipairs(self:_related(id)) do
       local map = self:_contract_map(rel)
@@ -345,45 +402,59 @@ function W:_resolve()
     end
   end
   -- 2) the SmartBuildOS drivers installed in the project
-  local cands = {}
-  for _, dev in ipairs(self:_installed()) do
-    if not tried[dev] then
-      local map = self:_contract_map(dev)
-      if map then cands[#cands + 1] = { dev = dev, map = map } end
-    end
-  end
-  for _, c in ipairs(cands) do
+  local installed = self:_installed()
+  for _, dev in ipairs(installed) do
     for _, id in ipairs(tried) do
-      if self:_owns(c.dev, id) then return c.dev, c.map, "main device of " .. id end
+      if dev == id or self:_owns(dev, id) then
+        -- the selection IS (or belongs to) this Apple TV driver: use it or report it, never another one
+        local map = self:_contract_map(dev)
+        if map then return dev, map, "main device of " .. id end
+        return nil, nil, "Apple TV driver " .. label(self, dev) .. " has no NOW_PLAYING_* variables — " ..
+          "update it to SmartBuildOS Apple TV Native Beta 120 or later"
+      end
     end
   end
-  if #cands == 1 then return cands[1].dev, cands[1].map, "only " .. M.C4Z .. " device in the project" end
+  local cands = {}
+  for _, dev in ipairs(installed) do
+    if not tried[dev] and self:_contract_map(dev) then cands[#cands + 1] = dev end
+  end
+  if #cands == 1 then
+    return cands[1], self:_contract_map(cands[1]),
+      "the only " .. M.C4Z .. " device in the project (device " .. first .. " is not one)"
+  end
   if #cands > 1 then
     local ids = {}
-    for _, c in ipairs(cands) do ids[#ids + 1] = tostring(c.dev) end
-    return nil, nil, "Ambiguous: several Apple TV drivers (devices " .. table.concat(ids, ", ") ..
-      ") and device " .. first .. " is none of them; set Apple TV Driver Device ID"
+    for _, d in ipairs(cands) do ids[#ids + 1] = tostring(d) end
+    return nil, nil, "Ambiguous: " .. #cands .. " Apple TV drivers in the project (devices " .. table.concat(ids, ", ") ..
+      ") and device " .. first .. " is none of them — select the right one or set Apple TV Driver Device ID"
   end
   local name = self:_name_of(first)
   if not name and not self:_vars(first) then
     return nil, nil, "Device " .. first .. " not found — select the Apple TV driver again"
   end
-  return nil, nil, "Selected device " .. first .. (name and (" (" .. name .. ")") or "") ..
-    " has no NOW_PLAYING_* variables — is the driver Beta 120 or later?"
+  return nil, nil, "Device " .. first .. (name and (" (" .. name .. ")") or "") ..
+    " has no NOW_PLAYING_* variables and no SmartBuildOS Apple TV Native driver (Beta 120+) was found"
 end
 
-function W:_set_status(text)
-  if self.status == text then return end
-  self.status = text
+function W:_notify()
   if self.on_change then self.on_change(self) end
 end
 
-function W:_listen()
+function W:_set_status(text, force_notify)
+  if self.status == text and not force_notify then return end
+  self.status = text
+  self:_notify()
+end
+
+function W:_listen(force)
   local id = self.map and self.map[full(M.REVISION)]
   local key = self.dev and type(id) == "number" and (self.dev .. ":" .. id) or nil
-  if key == self.listen_key then return end
+  if key == self.listen_key and not force then return end
   self:_unlisten()
-  if not key then return end
+  if not key then
+    if self.dev then self:_log("info", "no variable id for NOW_PLAYING_REVISION: relying on the " .. M.POLL_S .. " s poll") end
+    return
+  end
   self.listen_key, self.listen_dev, self.listen_var = key, self.dev, id
   self.registering = true
   local ok, err = self:_call("RegisterVariableListener", self.dev, id)
@@ -396,6 +467,11 @@ function W:_unlisten()
     self:_call("UnregisterVariableListener", self.listen_dev, self.listen_var)
   end
   self.listen_key, self.listen_dev, self.listen_var = nil, nil, nil
+end
+
+function W:_cancel_timers()
+  if self.timer then self.timer:cancel(); self.timer = nil end
+  if self.retry then self.retry:cancel(); self.retry = nil end
 end
 
 function W:_arm()
@@ -412,36 +488,47 @@ end
 function W:_connect(reason)
   local dev, map, how = self:_resolve()
   if not dev then
+    local had = self.dev ~= nil or self.snap ~= nil
     if self.dev then self:_log("warn", "lost the Apple TV driver device " .. self.dev .. ": " .. tostring(how)) end
     self:_unlisten()
-    self.dev, self.map, self.applied_rev, self.snap = nil, nil, nil, nil
-    self:_set_status(how)
+    self.dev, self.map, self.how, self.applied_rev, self.snap = nil, nil, nil, nil, nil
     if how ~= self.last_problem then self:_log("warn", how) end
     self.last_problem = how
+    self:_set_status(how, had) -- what was shown is gone: always tell the app
     return false
   end
   self.last_problem = nil
   if dev ~= self.dev then
-    self:_log("info", "using device " .. dev .. " (" .. tostring(self:_name_of(dev)) .. ", " .. how .. ")" ..
-      (reason and (" [" .. reason .. "]") or ""))
-    self.applied_rev = nil
+    self:_log("info", "using " .. label(self, dev) .. ": " .. how .. (reason and (" [" .. reason .. "]") or ""))
+    self.applied_rev, self.snap = nil, nil
   end
-  self.dev, self.map = dev, map
+  self.dev, self.map, self.how = dev, map, how
   self:_listen()
+  return true
+end
+
+local function same_map(a, b)
+  if not a or not b then return false end
+  for k, v in pairs(a) do if b[k] ~= v then return false end end
+  for k in pairs(b) do if a[k] == nil then return false end end
   return true
 end
 
 -- rebuild the name map of the current device (ids change when that driver reloads)
-function W:_remap()
-  if not self.dev then return self:_connect("remap") end
+-- -> ok, changed
+function W:_remap(force_listen)
+  if not self.dev then return self:_connect("remap"), true end
   local map = self:_contract_map(self.dev)
-  if not map then return self:_connect("variables gone") end
+  if not map then return self:_connect("variables gone"), true end
+  local changed = not same_map(map, self.map)
+  if changed then self:_log("info", "variable ids of device " .. self.dev .. " changed: map rebuilt") end
   self.map = map
-  self:_listen()
-  return true
+  self:_listen(force_listen)
+  return true, changed
 end
 
-function W:_get(name)
+-- the value of a contract field; `t` caches one GetDeviceVariables table for name-only maps
+function W:_get(name, t)
   local id = self.map and self.map[full(name)]
   if id == nil then return nil end
   if type(id) == "number" then
@@ -450,69 +537,119 @@ function W:_get(name)
     return nil
   end
   -- no id in the GetDeviceVariables shape: read the value from the whole table
+  if t then
+    if t.vars == nil then t.vars = self:_vars(self.dev) or false end
+    return M.value_in(t.vars or nil, full(name))
+  end
   return M.value_in(self:_vars(self.dev), full(name))
 end
 
--- one consistent snapshot: -> snap, rev | nil, err
-function W:_read_snapshot()
-  local snap, r1, r2
-  for attempt = 1, M.MAX_TRIES do
-    r1 = self:_get(M.REVISION)
-    if r1 == nil then return nil, "cannot read NOW_PLAYING_REVISION" end
-    snap = {}
-    for _, f in ipairs(M.FIELDS) do snap[f] = self:_get(f) or "" end
-    r2 = self:_get(M.REVISION)
-    if r2 == nil then return nil, "cannot read NOW_PLAYING_REVISION" end
-    if r1 == r2 then break end
-    if attempt == M.MAX_TRIES then
-      self:_log("warn", "revision kept changing during " .. M.MAX_TRIES .. " reads (" .. r1 .. " -> " .. r2 ..
-        "); using the latest read")
-    else
-      self:_log("debug", "torn read (revision " .. r1 .. " -> " .. r2 .. "), reading again")
-    end
-  end
-  snap.REVISION = r2
-  return snap, tonumber(s(r2) or "") or 0
+local function rev_of(v)
+  if not is_int_str(v) then return nil end
+  return tonumber((v:gsub("%s", "")))
 end
 
-function W:read(reason, force)
-  if not self.opts then return end
-  if not self.dev and not self:_connect(reason) then return end
-  local snap, rev = self:_read_snapshot()
-  if not snap then
-    -- ids may have moved (driver reload): rebuild the map once and try again
-    if not (self:_remap() and self.dev) then return end
-    snap, rev = self:_read_snapshot()
-    if not snap then
-      self:_set_status("Device " .. self.dev .. ": " .. tostring(rev))
-      return
+-- one consistent snapshot: REVISION, all fields, REVISION again; retried while it moves.
+-- -> snap, rev | nil, err ("torn" when it never settled)
+function W:_read_snapshot()
+  for attempt = 1, M.MAX_TRIES do
+    local r1 = self:_get(M.REVISION)
+    if r1 == nil then return nil, "cannot read NOW_PLAYING_REVISION" end
+    if not rev_of(r1) then return nil, "NOW_PLAYING_REVISION is not a number (" .. r1 .. ")" end
+    local snap, t = {}, {}
+    for _, f in ipairs(M.FIELDS) do snap[f] = self:_get(f, t) or "" end
+    local r2 = self:_get(M.REVISION)
+    if r2 == nil then return nil, "cannot read NOW_PLAYING_REVISION" end
+    if r1 == r2 then
+      local ok, why = M.plausible(snap)
+      if not ok then return nil, "implausible snapshot (" .. why .. ")" end
+      snap.REVISION = r2
+      return snap, rev_of(r2)
     end
+    self:_log("debug", "torn read (revision " .. r1 .. " -> " .. tostring(r2) .. "), attempt " .. attempt)
   end
-  if self.applied_rev and rev < self.applied_rev then
-    self:_log("info", "revision went back (" .. self.applied_rev .. " -> " .. rev ..
-      "): the Apple TV driver restarted; re-resolving its variables")
-    self.applied_rev = nil
-    if not (self:_remap() and self.dev) then return end
-    snap, rev = self:_read_snapshot()
-    if not snap then return self:_set_status("Device " .. tostring(self.dev) .. ": " .. tostring(rev)) end
-  end
-  if rev == self.applied_rev and not force then return end
+  return nil, "torn"
+end
+
+function W:_retry_soon(reason)
+  if self.retry then return end
+  self:_log("warn", "revision kept changing during " .. M.MAX_TRIES .. " reads; nothing published, retrying")
+  self.retry = self.deps.set_timer(M.RETRY_S, function()
+    self.retry = nil
+    self:read("retry after torn read (" .. tostring(reason) .. ")")
+  end)
+end
+
+function W:_apply(snap, rev, reason)
   self.applied_rev, self.snap = rev, snap
   self.status = "Connected to " .. (self:_name_of(self.dev) or ("device " .. self.dev)) .. " (device " .. self.dev ..
     "), revision " .. rev .. (s(snap.VALID) == "1" and "" or ", nothing playing (VALID=0)")
   self.deps.log("debug", "Apple TV driver: snapshot " .. rev .. " (" .. tostring(reason) .. "): state=" ..
     tostring(snap.PLAY_STATE) .. " valid=" .. tostring(snap.VALID) .. " title=" .. tostring(snap.TITLE))
-  if self.on_change then self.on_change(self) end
+  self:_notify()
+end
+
+function W:_read(reason, force)
+  if not self.dev and not self:_connect(reason) then return false end
+  local snap, rev = self:_read_snapshot()
+  if not snap and rev ~= "torn" then
+    -- the variable ids may have moved (driver reload): rebuild the map once and read again
+    self:_log("info", tostring(rev) .. ": re-resolving the variables")
+    local ok, changed = self:_remap(true)
+    if not (ok and self.dev) then return false end
+    if changed then force = true end
+    snap, rev = self:_read_snapshot()
+  end
+  if not snap then
+    if rev == "torn" then self:_retry_soon(reason); return false end
+    self:_set_status("Device " .. tostring(self.dev) .. ": " .. tostring(rev))
+    return false
+  end
+  if self.applied_rev and rev < self.applied_rev then
+    self.restarts = self.restarts + 1
+    self:_log("info", "revision went back (" .. self.applied_rev .. " -> " .. rev ..
+      "): the Apple TV driver restarted; re-resolving its variables")
+    self.applied_rev = nil
+    local ok = self:_remap(true) -- also re-registers the listener
+    if not (ok and self.dev) then return false end
+    snap, rev = self:_read_snapshot()
+    if not snap then
+      if rev == "torn" then self:_retry_soon(reason); return false end
+      self:_set_status("Device " .. tostring(self.dev) .. ": " .. tostring(rev))
+      return false
+    end
+  end
+  if rev == self.applied_rev and not force then return true end
+  self:_apply(snap, rev, reason)
+  return true
+end
+
+-- Read now. force: re-apply even when REVISION is unchanged. Never re-entrant: a read asked for
+-- while one runs (a listener fired from inside it) runs right after it.
+function W:read(reason, force)
+  if not self.opts then return false end
+  if self.reading then
+    self.again = { reason = reason, force = force or (self.again and self.again.force) }
+    return false
+  end
+  self.reading = true
+  local ok, res = pcall(self._read, self, reason, force)
+  self.reading = false
+  if not ok then self.again = nil; error(res, 0) end
+  local again = self.again
+  self.again = nil
+  if again and self.opts then return self:read(again.reason, again.force) end
+  return res
 end
 
 function W:_safety_poll()
   if not self.opts then return end
   if not self.dev then
-    if self:_connect("retry") then self:read("connect") end
+    if self:_connect("retry") then self:read("connect", true) end
     return
   end
-  self:_remap()
-  self:read("safety poll")
+  local ok, changed = self:_remap()
+  if ok and self.dev then self:read("safety poll", changed) end
 end
 
 function W:configure(opts)
@@ -520,31 +657,34 @@ function W:configure(opts)
   local o = self.opts
   if o and o.selected == opts.selected and o.override == opts.override then
     if o.name ~= opts.name then
-      self.opts = opts
-      if self.on_change then self.on_change(self) end
+      o.name = opts.name
+      self:_notify()
     end
+    -- unresolved so far: any reconfiguration is a good moment to try again
+    if not self.dev and self:_connect("reconfigure") then self:read("connect", true) end
     return
   end
   self:stop()
   self.opts = { selected = opts.selected, override = opts.override, name = opts.name }
-  if self:_connect("configure") then self:read("connect") end
+  if self:_connect("configure") then self:read("connect", true) end
   self:_arm()
 end
 
 function W:stop()
-  if self.timer then self.timer:cancel(); self.timer = nil end
+  self:_cancel_timers()
   self:_unlisten()
   local was = self.opts ~= nil
-  self.opts, self.dev, self.map, self.applied_rev, self.snap, self.last_problem = nil, nil, nil, nil, nil, nil
+  self.opts, self.dev, self.map, self.how, self.applied_rev, self.snap, self.last_problem = nil, nil, nil, nil, nil, nil, nil
+  self.again = nil
   self.status = "Not configured"
-  if was and self.on_change then self.on_change(self) end
+  if was then self:_notify() end
 end
 
 function W:on_variable(dev, var, value)
   dev, var = tonumber(dev), tonumber(var)
   if not self.listen_key or dev ~= self.listen_dev or var ~= self.listen_var then return false end
-  if self.registering then return true end -- the immediate callback: configure reads explicitly
-  local rev = tonumber(s(value) or "")
+  if self.registering then return true end -- the immediate callback: connecting reads explicitly
+  local rev = rev_of(value)
   if rev and self.applied_rev and rev == self.applied_rev then return true end
   self:read("revision " .. tostring(value))
   return true
@@ -559,7 +699,7 @@ function W:playback()
   local now = self.deps.now()
   if not self.snap then
     local pb = playback_mod.empty("off", now)
-    pb.source = { provider = "appletv", device_name = self.opts and self.opts.name or nil }
+    pb.source = { provider = "appletv", device_name = self:device_name() }
     return pb
   end
   return M.to_playback(self.snap, { device_name = self:device_name(), now = now })
@@ -567,32 +707,33 @@ end
 
 function W:status_text() return self.status end
 
--- "Test Metadata Sources": -> lines, ok
+-- "Test Metadata Sources": re-resolves, re-reads -> lines, ok
 function W:report()
   if not self.opts then return { "  Apple TV driver: not configured" }, true end
   if self.dev then self:_remap() else self:_connect("test") end
-  if self.dev then self:read("test") end
+  if self.dev then self:read("test", true) end
   local lines = {}
   if not self.dev then
     lines[1] = "  Apple TV driver (SmartBuildOS)  FAILED - " .. tostring(self.status)
     local ids = self:_installed()
-    if #ids > 0 then
-      local t = {}
-      for _, id in ipairs(ids) do t[#t + 1] = id .. " (" .. tostring(self:_name_of(id)) .. ")" end
-      lines[2] = "    " .. M.C4Z .. " devices in the project: " .. table.concat(t, ", ")
-    end
+    local t = {}
+    for _, id in ipairs(ids) do t[#t + 1] = id .. " (" .. tostring(self:_name_of(id)) .. ")" end
+    lines[2] = "    " .. M.C4Z .. " devices in the project: " .. (#t > 0 and table.concat(t, ", ") or "none found")
     return lines, false
   end
-  local found, missing = {}, {}
+  local found, missing = { full(M.REVISION) }, {}
   for _, f in ipairs(M.FIELDS) do
-    if self.map[full(f)] then found[#found + 1] = f else missing[#missing + 1] = full(f) end
+    if self.map[full(f)] then found[#found + 1] = full(f) else missing[#missing + 1] = full(f) end
   end
   local snap = self.snap or {}
-  lines[1] = "  Apple TV driver (SmartBuildOS)  OK - " .. (self:_name_of(self.dev) or "?") .. " (device " .. self.dev ..
-    "), revision " .. tostring(snap.REVISION) .. ", VALID=" .. tostring(snap.VALID) .. ", state " ..
-    tostring(s(snap.PLAY_STATE) or "-") .. (s(snap.TITLE) and (", title \"" .. snap.TITLE .. "\"") or "")
-  lines[2] = "    variables found: " .. (#found + 1) .. "/" .. (#M.FIELDS + 1) ..
-    (#missing > 0 and (" (missing: " .. table.concat(missing, ", ") .. ")") or " (all)")
+  lines[#lines + 1] = "  Apple TV driver (SmartBuildOS)  " .. (#missing == 0 and "OK" or "INCOMPLETE") .. " - " ..
+    label(self, self.dev) .. ", " .. tostring(self.how)
+  lines[#lines + 1] = "    variables found: " .. #found .. "/" .. (#M.FIELDS + 1) ..
+    (#missing > 0 and (" (missing: " .. table.concat(missing, ", ") .. ")") or " (all)") ..
+    (self.listen_var and (", listening on NOW_PLAYING_REVISION (variable " .. self.listen_var .. ")") or "")
+  lines[#lines + 1] = "    revision " .. tostring(snap.REVISION or "?") .. ", VALID=" .. tostring(snap.VALID or "?") ..
+    ", state " .. tostring(s(snap.PLAY_STATE) or "-") .. (s(snap.TITLE) and (", title \"" .. snap.TITLE .. "\"") or "") ..
+    (s(snap.APP_NAME) and (", app " .. snap.APP_NAME) or "")
   return lines, #missing == 0
 end
 

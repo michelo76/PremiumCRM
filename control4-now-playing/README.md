@@ -5,8 +5,9 @@ rich "about what's playing" page (poster, title, episode, synopsis, cast, rating
 behind a **Navigator button** (UI Button proxy web view). It also publishes **variables** and
 **events** for Composer programming. It is informational only and never controls playback.
 
-Sources: Roku (ECP), Apple TV (through the companion pyatv bridge in `bridge/`), Home Assistant
-media players, and Control4 room media. Metadata: TMDB, OMDb (IMDb / Rotten Tomatoes /
+Sources: Roku (ECP), Apple TV (read from the SmartBuildOS Apple TV Native driver already in the
+project — no pairing, no bridge — or, as a fallback, through the companion pyatv bridge in
+`bridge/`), Home Assistant media players, and Control4 room media. Metadata: TMDB, OMDb (IMDb / Rotten Tomatoes /
 Metacritic), Gracenote (optional), iTunes + MusicBrainz (keyless).
 
 The dealer documentation shown in Composer is [`driver/www/documentation.html`](driver/www/documentation.html).
@@ -18,7 +19,8 @@ The dealer documentation shown in Composer is [`driver/www/documentation.html`](
  Roku :8060 ◄────┤ np.providers.roku ─┐                                                   │
  ATV bridge ◄────┤ np.providers.bridge├─► np.providers.multi ─► np.engine ──► on_change ──┤
  Home Asst. ◄────┤ np.providers.ha  ──┤    (pick/merge/stale)     │   ▲  state doc (JSON) │
- C4 room vars ──►┤ c4.room → static ──┘                           │   │                   │
+ C4 room vars ──►┤ c4.room → static ──┤                           │   │                   │
+ ATV driver vars►┤ c4.appletv→static ─┘ (SmartBuildOS NOW_PLAYING_* contract)            │
                  │                                np.enrich.pipeline (TMDB/OMDb/GN/music) │
                  │                                                    ▲ deps (c4.deps:     │
                  │  c4.app (wiring) ◄──────────── engine events ──────┘  C4:url, timers,   │
@@ -48,8 +50,9 @@ control4-now-playing/
   driver/                     → zipped as now_playing_info.c4z
     driver.xml                proxies, capabilities, events, properties, actions, commands
     driver.lua                entry points only
-    c4/                       glue: app, config, deps, events, room, artwork, httpserver,
-                              status, diagnostics, variables (append-only list), version, b64
+    c4/                       glue: app, config, deps, events, room, appletv, artwork,
+                              httpserver, status, diagnostics, variables (append-only list),
+                              version, b64
     np/                       core: engine, providers, enrichers, schema, flatten, json, util
     www/index.html            the web UI (self-contained)
     www/documentation.html    dealer docs (Composer "Documentation" tab)
@@ -85,7 +88,8 @@ cd bridge && python -m pytest     # Apple TV bridge (incl. the bridge <-> Lua co
 
 `tools/e2e.sh` runs `tests/e2e/gen_states.lua`, which drives the **real** `driver.lua`
 (glue + engine + providers + enrichers) on the C4 mock with the scripted fixtures in
-`tests/fixtures` (Roku + HA episode with TMDB + OMDb, HA music with iTunes/MusicBrainz, Roku
+`tests/fixtures` (Roku + HA episode with TMDB + OMDb, an episode read from the SmartBuildOS Apple
+TV driver's variables (selector on its Media Player proxy) with TMDB + OMDb, HA music with iTunes/MusicBrainz, Roku
 antenna live TV + Gracenote, Apple TV bridge movie with LAN artwork, unenriched, paused, idle,
 off, room media only) and writes the exact `STATE_JSON`, `SendDataToUI` and `GET_ARTWORK`
 payloads to `build/e2e` (lua5.1 and LuaJIT output must be byte-identical). Then
@@ -137,13 +141,16 @@ node tools/mock-server/server.js --port 8099
    Info** to a room.
 3. Configure properties (see the Documentation tab), run **Test Metadata Sources**.
 4. Room › Navigators › Watch/Listen: make **Now Playing** visible; refresh Navigators.
-5. Apple TV only: run the bridge (`bridge/README.md`).
+5. Apple TV: select the SmartBuildOS Apple TV Native driver in **Apple TV Driver** (see
+   "Apple TV driver source" below). Only for an Apple TV without that driver: run the bridge
+   (`bridge/README.md`).
 
 ## Data sources and what they can tell you
 
 | Source | App | Title | Episode / S·E | Artist/album | Play/pause | Position/duration | Artwork | Notes |
 |---|---|---|---|---|---|---|---|---|
 | Roku ECP | yes | **no** | no | no | yes | yes | app icon | Roku TV tuner: channel + program (guide data). Needs "Control by mobile apps" = Default/Permissive |
+| Apple TV driver (SmartBuildOS, variables) | yes | if the app publishes it | often (series/S/E) | yes (Music) | yes (Unknown → idle) | yes (position at the last observation, extrapolated) | only when the app reports an HTTPS URL | local, no pairing; kind is inferred (no type field) |
 | Apple TV bridge (pyatv) | yes | if the app publishes it | often | yes (Music) | yes | yes | yes (LAN URL; relayed for remote apps) | some DRM/live apps publish nothing; `movie`/`live_tv` are heuristics |
 | Home Assistant | often | yes | yes | yes | yes | yes | yes (LAN proxy; relayed for remote apps) | the catch-all (Sonos, Plex, Kodi, Chromecast, Android TV, Roku titles…) |
 | Control4 room media | no | yes | no | yes | **no** (shown as playing while room on) | no | sometimes (base64 `<img>` / IMAGEURL) | 1031 XML undocumented; music shape confirmed by a live capture (`<mediatype>`, `<deviceid>`); tolerant parser |
@@ -153,8 +160,65 @@ node tools/mock-server/server.js --port 8099
 | iTunes + MusicBrainz | – | – | – | album, year, tracks | – | – | album art | keyless |
 
 Several sources can be active; the engine picks the most "active" (playing > buffering > paused
-> stopped/idle > off, ties by order Roku, Apple TV, HA, room) and merges titles from a source in
-the same physical-device group ("Home Assistant Entity Is = Same Device As Roku/Apple TV").
+> stopped/idle > off, ties by order Roku, Apple TV driver, Apple TV bridge, HA, room; the active
+source is kept while it ranks as high as the best) and merges titles from a source in the same
+physical-device group ("Home Assistant Entity Is = Same Device As Roku/Apple TV"; the Apple TV
+driver source and the bridge are both "the Apple TV").
+
+## Apple TV driver source (SmartBuildOS Apple TV Native)
+
+**Setup.** Needs **SmartBuildOS Apple TV Native Beta 120 or later**
+(`smartbuildos_appletv_native.c4z`) in the same project. Select it in **Apple TV Driver** (a
+device selector filtered to that driver); optionally set **Apple TV Name**. No second pairing, no
+bridge, no network traffic: both drivers run on the same controller. **Apple TV Driver Status**
+(read-only) shows the device being read and the snapshot revision, or why it cannot be read.
+If the selector offers/stores one of the driver's child proxies, the main device is found
+automatically; when it is not, type the main device's id into **Apple TV Driver Device ID**
+(overrides the selector). The pyatv bridge properties can stay set as a fallback.
+
+**Contract** (from the Apple TV driver's author). Read-only STRING variables on the **main**
+Apple TV driver device — not on its Media Player (binding 5000), "Apple TV Apps & Search"
+(5001) or App Switcher (5002) proxies: `NOW_PLAYING_TITLE`, `_SERIES`, `_SEASON`, `_EPISODE`,
+`_ARTIST`, `_ALBUM`, `_APP_NAME` (display name, may fall back to the bundle id), `_APP_ID`,
+`_PLAY_STATE` (`Playing`/`Paused`/`Stopped`/`Interrupted`/`Seeking`/`Unknown`, empty when
+cleared), `_POSITION` (seconds at the last observation), `_DURATION`, `_ARTWORK_URL` (HTTPS or
+empty), `_UPDATED_AT` (controller epoch s; `0` when cleared), `_VALID` (`1` observed, `0`
+cleared) and `_REVISION` (incremented per snapshot; resets when that driver reloads). Missing
+fields are empty; position/duration may be `0`. Event 19 "Now Playing snapshot updated" fires
+after all of them are written. Not used on purpose: `PLAYBACK_POSITION` (a 1/s estimate) and
+event 12 (title only).
+
+**How it is read** (`driver/c4/appletv.lua`). Variable ids are never hard-coded: they are
+resolved by exact name from `C4:GetDeviceVariables(device)` (several table shapes accepted) and
+re-resolved when a read fails, a value is implausible (REVISION not a number, VALID not 0/1),
+REVISION goes backwards (a restart) or on the 30 s safety poll. A listener on `NOW_PLAYING_REVISION`
+(`C4:RegisterVariableListener`) triggers reads; every read is REVISION → all fields → REVISION,
+retried up to 3 times while it moves — a torn snapshot is never published (retried 1 s later).
+Unchanged revisions are ignored; Refresh / Refresh Now force a re-read. The snapshot is pushed into
+the `static` provider `appletv_driver` (provider name `appletv`, ordered before the bridge).
+
+Mapping: Playing→playing, Paused→paused, Stopped→stopped, Seeking→buffering,
+Interrupted→paused, Unknown→idle; VALID=0 or an empty state → idle with all media and artwork
+cleared. Kind (inferred — the contract has no type field; same rules as the bridge): series or
+season/episode → episode; artist or album → music; duration > 60 min → movie; a title → video;
+else unknown. Season/episode must be plain numbers; artwork must be `https://`.
+
+**Device resolution**: Apple TV Driver Device ID, then Apple TV Driver; the first that exposes
+`NOW_PLAYING_REVISION` wins. Otherwise the main device is searched through the documented
+proxy↔protocol links (`C4:GetDevices({DeviceIds=…})` `protocol`/`proxies` sub-tables), then among
+the installed `smartbuildos_appletv_native.c4z` devices (`C4:GetDevicesByC4iName`,
+`C4:GetDevices({C4iNames=…})`, ownership via `C4:GetProxyDevicesById`) — all optional and guarded.
+A selected Apple TV driver without the variables (older beta) is reported, never swapped for
+another one; several Apple TV drivers with none related to the selection is reported as
+ambiguous (set the Device ID). Everything is logged and shown in **Apple TV Driver Status**;
+**Test Metadata Sources** lists the device, variables found/missing by name, revision and VALID.
+
+**Limits.** Metadata depends on what the app publishes (some apps report only the app). Artwork
+only when the app reports an HTTPS URL. The media kind is a heuristic. `Unknown` is shown as idle.
+A stalled Apple TV driver (still `VALID=1`, no more updates) cannot be told apart from a long
+pause: the last snapshot stays until it is cleared or replaced.
+**Programming tip:** wire the Apple TV driver's event 19 "Now Playing snapshot updated" to this
+driver's **Refresh** command for belt-and-braces updates (the REVISION listener normally suffices).
 
 ## Page ↔ driver protocol
 
@@ -270,7 +334,11 @@ change reconfiguration without timer leaks (20 rounds incl. room media / LAN por
 GET_STATE via ExecuteCommand and UIRequest, GET_ARTWORK (param shapes, current-state-only,
 one download per URL, bridge token header, oversize/failure/disabled), room media XML variants
 (TITLE/ARTIST/ALBUM/IMAGEURL plain + base64, LINE1-3, CDATA, attributes, JSON, empty, garbage),
-room power gating, LAN HTTP server (GET /, /api/state 200 → 304, 404, 405, HEAD, split chunks,
+room power gating, the Apple TV driver source (mapping table, initial read, revision updates,
+same-title seeks without Media Changed, VALID=0, torn reads never published, restart with re-numbered
+variable ids, proxy → main device, older beta / unrelated / deleted device, manual override,
+ambiguity, name-keyed variable tables, TMDB enrichment, bridge fallback, Refresh, diagnostics,
+listener/timer counts across reconfiguration and destroy), LAN HTTP server (GET /, /api/state 200 → 304, 404, 405, HEAD, split chunks,
 413), the LAN relay (token mint/persist/redaction, 401, `/api/artwork` bytes / 403 / 502, `?inm=`,
 OPTIONS, `CreateServer` false-return + backoff retry, legacy 1-argument fallback, identifier
 filtering, `DestroyServer(port)`, 10 s idle close, async answers dropped after a disconnect),
@@ -335,13 +403,19 @@ notifications sent before the project finishes starting are lost.
     only to add entropy to the token when present).
 13. The UI Button web view on the on-screen (TV) Navigator — undocumented, assumed unsupported.
 14. The page in the **Gecko 96** Navigator web view (layout, fonts, line clamps, data: images).
+15. **Apple TV driver source** — the exact `C4:GetDeviceVariables` table shape (expected
+    `{[id]={name=,value=}}`; other shapes are tolerated), whether `GetDevicesByC4iName` /
+    `GetDevices` list the SmartBuildOS main device under its c4z name, what the DEVICE_SELECTOR
+    stores for a multi-proxy driver (main device or a proxy), whether listeners survive that
+    driver's reload, and that variable writes of another driver are delivered to
+    `OnWatchedVariableChanged` asynchronously (a synchronous delivery is handled too).
 
 ### First install on a real controller — checklist
 
 Ordered by risk; each step names how to see the answer.
 
 1. **Driver loads (dotted `require`)** — add the c4z; Lua output must show `Now Playing Info
-   1.1.0 … started` (Debug Mode = Print). If you see `failed to load c4.app: module 'np.engine'
+   1.2.0 … started` (Debug Mode = Print). If you see `failed to load c4.app: module 'np.engine'
    not found`, dotted requires do not resolve inside the c4z on this OS: flatten the module
    names (e.g. `np_engine.lua`) before anything else.
 2. **LAN relay up** — properties: **LAN URL** = `http://<controller-ip>:8487/?k=…` (not
@@ -365,7 +439,15 @@ Ordered by risk; each step names how to see the answer.
    Playing** visible, File › Refresh Navigators; the icon must switch to the "playing" variant and
    the label to what is playing ("Paused: …" when paused). Reboot the controller: within ~60 s the
    button must open the relay URL and show the right state again.
-6. **Events** — reboot the controller while a movie plays: no `Movie Started` must fire; pause /
+6. **Apple TV driver source** — select the Apple TV driver in **Apple TV Driver**; **Apple TV
+   Driver Status** must read `Connected to <name> (device N), revision R` with N the **main**
+   Apple TV driver device (not its Media Player / Apps & Search / App Switcher proxy). If it says
+   "has no NOW_PLAYING_* variables" or "Ambiguous", type the main device's id (Composer: the
+   Apple TV driver's device id, or the id shown in the status) into **Apple TV Driver Device ID**.
+   Play something on the Apple TV: title / state must follow within a second; run **Test Metadata
+   Sources** (all 15 variables found). Reload the Apple TV driver: the status must come back
+   within ~30 s with a low revision.
+7. **Events** — reboot the controller while a movie plays: no `Movie Started` must fire; pause /
    resume must fire Playback Paused / Resumed.
 
 ## Roadmap

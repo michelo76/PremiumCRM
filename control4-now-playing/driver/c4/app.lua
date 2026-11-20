@@ -677,10 +677,11 @@ end
 function App:_action_refresh()
   if self.info and (self.info.room_media or self.info.gated) then self:_push_room() end
   -- also the target of the Apple TV driver's event 19 "Now Playing snapshot updated" (dealer
-  -- programming): re-read its snapshot now, even when REVISION looks unchanged
+  -- programming): re-read its snapshot now, even when REVISION looks unchanged (an applied read
+  -- pushes through _atv_changed; an unresolved device is re-resolved first)
   if self.info and self.info.appletv_driver and self.atv then
+    if not self.atv.dev then self.atv:configure(self.info.appletv_driver) end
     self.atv:read("refresh", true)
-    self:_push_atv()
   end
   if self.engine.running then self.engine:refresh() end
   self:_out("Now Playing Info: refresh requested")

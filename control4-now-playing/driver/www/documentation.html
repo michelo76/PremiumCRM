@@ -21,7 +21,7 @@
 <body>
 
 <h1>Now Playing Info</h1>
-<p class="muted">Control4 DriverWorks driver &middot; version 1.1 &middot; OS 3.1.3 or later</p>
+<p class="muted">Control4 DriverWorks driver &middot; version 1.2 &middot; OS 3.1.3 or later</p>
 
 <p>Now Playing Info figures out <b>what is playing in a room</b> and shows a rich
 &ldquo;about what&rsquo;s playing&rdquo; page (poster, title, episode, synopsis, cast, ratings, progress)
@@ -39,6 +39,7 @@ The driver is purely informational: it never controls playback.</p>
 <ol>
   <li>Add the driver to the room whose media you want to show (or set the <b>Room</b> property).</li>
   <li>Fill in at least one source below. With no other source, the driver uses the Control4 room&rsquo;s own media information (on by default).</li>
+  <li>Apple TV with the SmartBuildOS Apple TV Native driver (Beta 120+): just select it in <b>Apple TV Driver</b> and check <b>Apple TV Driver Status</b> (see <a href="#atvdriver">below</a>).</li>
   <li>Optional but recommended: enter a free <b>TMDB API Key</b> (posters, synopsis, cast) and an <b>OMDb API Key</b> (IMDb / Rotten Tomatoes / Metacritic ratings).</li>
   <li>Make the button visible in Navigator (see <a href="#button">Showing the button</a>) and refresh Navigators.</li>
   <li>Run the action <b>Test Metadata Sources</b> and check the <b>Status</b> property.</li>
@@ -47,7 +48,7 @@ The driver is purely informational: it never controls playback.</p>
 
 <h2 id="sources">Sources (where &ldquo;what is playing&rdquo; comes from)</h2>
 <p>You can configure several sources at once; the driver shows the one that is playing
-(playing &gt; buffering &gt; paused &gt; stopped/idle &gt; off; ties go to Roku, then Apple TV, then Home Assistant, then Control4 room media).</p>
+(playing &gt; buffering &gt; paused &gt; stopped/idle &gt; off; ties go to Roku, then the Apple TV driver, then the Apple TV bridge, then Home Assistant, then Control4 room media).</p>
 
 <h3>Roku (Roku players and Roku TVs)</h3>
 <ul>
@@ -56,7 +57,18 @@ The driver is purely informational: it never controls playback.</p>
   <li>Roku reports the <b>app</b> (Netflix, Hulu&hellip;) and <b>play / pause / position</b>, but <b>not the title</b>. For titles, also add the same Roku through Home Assistant and set <b>Home Assistant Entity Is = Same Device As Roku</b>. On a Roku TV&rsquo;s antenna input the channel and, when guide data is present, the program are shown.</li>
 </ul>
 
-<h3>Apple TV (via the companion bridge)</h3>
+<h3 id="atvdriver">Apple TV (via the SmartBuildOS Apple TV Native driver) &mdash; recommended</h3>
+<ul>
+  <li>Requires <b>SmartBuildOS Apple TV Native Beta 120 or later</b> (<code>smartbuildos_appletv_native.c4z</code>) in the same project. Nothing else: no second pairing, no bridge, no network traffic &mdash; both drivers run on the controller.</li>
+  <li>Set <b>Apple TV Driver</b> to that Apple TV driver (the list only offers it). Optional <b>Apple TV Name</b> replaces its device name on the page.</li>
+  <li>Check <b>Apple TV Driver Status</b>: it must read <i>Connected to &lt;name&gt; (device N), revision R</i>. N must be the Apple TV driver&rsquo;s <b>main</b> device. The selector may store one of its child devices (Media Player, &ldquo;Apple TV Apps &amp; Search&rdquo;, App Switcher); the driver then finds the main device itself. If the status says it cannot (&ldquo;has no NOW_PLAYING_* variables&rdquo;, &ldquo;Ambiguous&rdquo;), type the main device&rsquo;s id into <b>Apple TV Driver Device ID</b> (it overrides the selector).</li>
+  <li>The driver reads the Apple TV driver&rsquo;s <code>NOW_PLAYING_*</code> variables and follows its snapshot revision; play/pause, title, series/season/episode, artist/album, app, position and duration update within about a second.</li>
+  <li><b>Programming tip (optional):</b> <code>WHEN &lt;Apple TV driver&gt; Now Playing snapshot updated</code> (its event 19) &rarr; <code>Now Playing Info &rsaquo; Refresh</code>. Refresh forces an immediate re-read; normally the variable listener already catches every update.</li>
+  <li>What you see depends on what the app publishes: some apps report only the app name. Artwork appears only when the app reports an HTTPS image (otherwise the page shows TMDB art or generated art). Movie / episode / music is inferred (the Apple TV driver has no media-type field). &ldquo;Unknown&rdquo; is shown as idle.</li>
+  <li>You can keep the bridge properties below set as a fallback; when both report something, the Apple TV driver is preferred.</li>
+</ul>
+
+<h3>Apple TV (via the companion bridge) &mdash; only without the Apple TV driver</h3>
 <ul>
   <li>Apple TV has no simple network API, so a small companion service, the <b>Apple TV bridge</b>, must run on an always-on computer on the same network (Raspberry Pi, NAS, Docker host). It ships with this driver&rsquo;s source in the <code>bridge/</code> folder; its README has the full steps:
     <ol>
@@ -132,6 +144,10 @@ see the read-only <b>Web View URL</b> property). When the page gets nothing from
   <tr><td>Use Control4 Room Media</td><td>On</td><td>See Sources.</td></tr>
   <tr><td>Show Only When Room Is On</td><td>Off</td><td>See Sources.</td></tr>
   <tr><td>Roku Address, Roku Name</td><td>&ndash;</td><td>IP or hostname (port 8060 implied).</td></tr>
+  <tr><td>Apple TV Driver</td><td>(empty)</td><td>The SmartBuildOS Apple TV Native driver (Beta 120+). See <a href="#atvdriver">Sources</a>.</td></tr>
+  <tr><td>Apple TV Driver Device ID</td><td>(empty)</td><td>Optional numeric id of the Apple TV driver&rsquo;s main device; overrides Apple TV Driver.</td></tr>
+  <tr><td>Apple TV Name</td><td>(empty)</td><td>Optional display name for the Apple TV (default: the Apple TV driver&rsquo;s device name).</td></tr>
+  <tr><td>Apple TV Driver Status</td><td>&ndash;</td><td>Read-only: the device being read and its snapshot revision, or why it cannot be read.</td></tr>
   <tr><td>Apple TV Bridge URL, Apple TV Device, Apple TV Bridge Token</td><td>&ndash;</td><td>See Sources.</td></tr>
   <tr><td>Home Assistant URL, Token, Entity ID, Entity Is</td><td>Separate Device</td><td>See Sources.</td></tr>
   <tr><td>TMDB / OMDb / Gracenote API Key, Gracenote Lineup ID</td><td>&ndash;</td><td>Password fields; never written to logs.</td></tr>
@@ -146,13 +162,13 @@ see the read-only <b>Web View URL</b> property). When the page gets nothing from
 <h2 id="actions">Actions</h2>
 <table>
   <tr><th>Action</th><th>What it does</th></tr>
-  <tr><td>Refresh Now</td><td>Ask all sources immediately.</td></tr>
+  <tr><td>Refresh Now</td><td>Ask all sources immediately (re-reads the Apple TV driver too).</td></tr>
   <tr><td>Clear Metadata Cache</td><td>Forget cached TMDB/OMDb/music lookups and artwork fetched for the page.</td></tr>
   <tr><td>Print State</td><td>Prints every variable value and the per-source state to the Lua output window.</td></tr>
   <tr><td>Print Room Media Info</td><td>Prints the room&rsquo;s raw media variables (incl. &ldquo;CURRENT MEDIA INFO&rdquo;) and how the driver parsed them. If room media shows wrong or empty, please send us this output.</td></tr>
-  <tr><td>Test Metadata Sources</td><td>Makes one small request to each configured source and metadata service and prints OK or the reason it failed.</td></tr>
+  <tr><td>Test Metadata Sources</td><td>Makes one small request to each configured source and metadata service and prints OK or the reason it failed. For the Apple TV driver: the device read, which <code>NOW_PLAYING_*</code> variables were found or are missing, the revision and VALID.</td></tr>
 </table>
-<p>Programming command: <b>Refresh</b> (same as Refresh Now).</p>
+<p>Programming command: <b>Refresh</b> (same as Refresh Now; a good target for the Apple TV driver&rsquo;s &ldquo;Now Playing snapshot updated&rdquo; event).</p>
 
 <h2 id="vars">Variables</h2>
 <p>Strings are empty and numbers 0 when unknown. Boolean variables are 1/0.</p>
@@ -218,6 +234,7 @@ WHEN Now Playing Info  Details Available
 <ul>
   <li><b>Roku</b> (ECP) reports the app and play/pause/position but no title. Combine it with Home Assistant for titles.</li>
   <li><b>Apple TV</b>: some apps publish no metadata at all (only playing/paused). Live TV apps rarely give a channel.</li>
+  <li><b>Apple TV driver</b>: artwork only when the app reports an HTTPS image; the media kind is a best guess; &ldquo;Unknown&rdquo; shows as idle. If the Apple TV driver stops updating while it still reports something, this driver cannot tell that apart from a long pause and keeps showing the last snapshot until it is cleared.</li>
   <li><b>Control4 room media</b> has no play/pause state; it is shown as playing while the room is on and media information exists.
       The exact format of the room&rsquo;s &ldquo;CURRENT MEDIA INFO&rdquo; differs between source drivers; the parser is tolerant, but if titles are wrong use <b>Print Room Media Info</b>.</li>
   <li>Metadata matching is by title (and year/season/episode when known); unusual titles, home videos and YouTube are deliberately not matched.</li>
@@ -235,6 +252,10 @@ WHEN Now Playing Info  Details Available
   <tr><td>Status: &ldquo;Not configured&rdquo;</td><td>Enter a source, or set Use Control4 Room Media = On.</td></tr>
   <tr><td>Status: &ldquo;Roku ECP access denied (HTTP 403)&rdquo;</td><td>On the Roku set Control by mobile apps &rsaquo; Network access = Default/Permissive.</td></tr>
   <tr><td>Status: &ldquo;Roku unreachable&rdquo; / &ldquo;bridge: &hellip;&rdquo;</td><td>IP address changed? Use DHCP reservations. Is the bridge running (<code>http://&lt;bridge&gt;:8765/v1/health</code>)?</td></tr>
+  <tr><td>Apple TV Driver Status: &ldquo;&hellip; has no NOW_PLAYING_* variables&rdquo;</td><td>Update the Apple TV driver to SmartBuildOS Apple TV Native Beta 120 or later. If the device named is a child (Media Player / Apps &amp; Search / App Switcher) and no main device was found, enter the main device&rsquo;s id in <b>Apple TV Driver Device ID</b>.</td></tr>
+  <tr><td>Apple TV Driver Status: &ldquo;Ambiguous: 2 Apple TV drivers &hellip;&rdquo;</td><td>Several Apple TV drivers and the selection belongs to none of them: select the right one again or enter its main device id in <b>Apple TV Driver Device ID</b>.</td></tr>
+  <tr><td>Apple TV Driver Status: &ldquo;Device N not found&rdquo;</td><td>The selected Apple TV driver was deleted or re-added: select it again.</td></tr>
+  <tr><td>Apple TV connected but nothing shows</td><td>Status ends with &ldquo;nothing playing (VALID=0)&rdquo;: the Apple TV driver reports nothing (check that driver). The app may publish no metadata; run <b>Test Metadata Sources</b> and look at the title / state it prints.</td></tr>
   <tr><td>Home Assistant 401</td><td>Create a new long-lived token; HA may temporarily ban an IP after failed logins.</td></tr>
   <tr><td>No posters / synopsis</td><td>Run <b>Test Metadata Sources</b>; check the TMDB key and that the controller can reach the internet.</td></tr>
   <tr><td>Wrong movie matched</td><td>Run <b>Clear Metadata Cache</b>; very generic titles may match the wrong film. Send us <b>Print State</b> output.</td></tr>

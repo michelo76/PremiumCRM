@@ -125,6 +125,27 @@ local SCENARIOS = {
       ha(m, "ha_appletv_episode.json")
       tmdb_bear(m)
     end },
+  { name = "atv_episode", desc = "SmartBuildOS Apple TV driver (variable contract) episode, TMDB + OMDb",
+    props = with(KEYS, { ["Apple TV Driver"] = "301" }), -- the Media Player proxy: resolved to the main device
+    setup = function(m)
+      local now = tostring(math.floor(m.t))
+      m:dyn_device(300, "Den Apple TV", {
+        NOW_PLAYING_TITLE = "Forks", NOW_PLAYING_SERIES = "The Bear", NOW_PLAYING_SEASON = "2",
+        NOW_PLAYING_EPISODE = "7", NOW_PLAYING_ARTIST = "", NOW_PLAYING_ALBUM = "", NOW_PLAYING_APP_NAME = "Hulu",
+        NOW_PLAYING_APP_ID = "com.hulu.plus", NOW_PLAYING_PLAY_STATE = "Playing", NOW_PLAYING_POSITION = "754",
+        NOW_PLAYING_DURATION = "2280", NOW_PLAYING_ARTWORK_URL = "", NOW_PLAYING_UPDATED_AT = now,
+        NOW_PLAYING_VALID = "1", NOW_PLAYING_REVISION = "42", PLAYBACK_POSITION = "0",
+      }, { c4i = "smartbuildos_appletv_native.c4z" })
+      m:proxy_device(301, "Den Apple TV", 300, "media_player.c4i")
+      tmdb_bear(m)
+    end,
+    check = function(st, m)
+      assert(st.source.provider == "appletv" and st.source.device_name == "Den Apple TV" and
+        st.source.app_name == "Hulu", "atv_episode: source")
+      assert(st.media.series_title == "The Bear" and st.media.season == 2 and st.media.episode == 7, "atv_episode: media")
+      assert(st.details and st.details.episode and st.details.episode.title == "Forks", "atv_episode: not enriched")
+      assert(m.updated_props["Apple TV Driver Status"]:find("revision 42", 1, true), "atv_episode: driver status")
+    end },
   { name = "music", desc = "HA Sonos music, iTunes + MusicBrainz",
     props = with(HA, { ["Home Assistant Entity ID"] = "media_player.kitchen" }),
     setup = function(m) ha(m, "ha_sonos_music.json"); music(m) end },
@@ -189,6 +210,7 @@ for _, sc in ipairs(SCENARIOS) do
   local sj = m.vars.STATE_JSON
   local st = assert(json.decode(sj), sc.name .. ": STATE_JSON is not JSON")
   assert(st.schema == 1 and type(st.sent_at) == "number", sc.name .. ": no schema/sent_at")
+  if sc.check then sc.check(st, m) end
   local dtu = m.data_to_ui[#m.data_to_ui]
   assert(dtu and dtu.cmd == "NOW_PLAYING" and type(dtu.params.state) == "string", sc.name .. ": no DataToUI push")
   for _, s in ipairs(SECRETS) do

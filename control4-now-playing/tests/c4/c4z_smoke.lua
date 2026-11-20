@@ -52,7 +52,7 @@ local function from_pkg(modname)
   end
   return false
 end
-for _, mod in ipairs({ "c4.app", "c4.config", "c4.room", "np.engine", "np.providers.roku", "np.enrich.pipeline", "np.json" }) do
+for _, mod in ipairs({ "c4.app", "c4.config", "c4.room", "c4.appletv", "np.engine", "np.providers.roku", "np.enrich.pipeline", "np.json" }) do
   check(from_pkg(mod), "require('" .. mod .. "') resolved inside the package")
 end
 
