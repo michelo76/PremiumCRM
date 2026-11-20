@@ -55,6 +55,9 @@ M.STATUS_S = 15
 M.RECONFIG_DEBOUNCE_S = 0.5
 M.CACHE_PERSIST_KEY = "np_enrich_cache_v1"
 M.ARTWORK_CMD = "NOW_PLAYING_ARTWORK"
+-- programming command (driver.xml <commands>): wire the Apple TV driver's event 19 "Now Playing
+-- snapshot updated" to it in Composer when OnDeviceEvent / the REVISION listener do not deliver
+M.ATV_REFRESH_CMD = "Refresh Apple TV Now Playing"
 
 M.READ_ONLY = {
   ["Driver Version"] = true, ["Status"] = true, ["Active Source"] = true, ["Metadata Sources"] = true,
@@ -395,7 +398,18 @@ end
 
 function App:_on_change(state, changes)
   if self.destroyed then return end
+  -- downloads for images that are no longer part of the state (another title, another source,
+  -- a cleared ARTWORK_URL) are cancelled; their late responses are never delivered
+  if self.artwork then
+    local n = self.artwork:retain(M.state_image_urls(state))
+    if n > 0 then self.deps.log("debug", "cancelled " .. n .. " artwork download(s) no longer in the state") end
+  end
   self:_publish(state, false, changes)
+end
+
+-- is `url` an image of the state as it is NOW (checked again when a download completes)
+function App:_art_current(url)
+  return self.engine ~= nil and not self.destroyed and M.state_image_urls(self.engine.state)[url] == true
 end
 
 function App:_publish(state, initial, changes)
@@ -590,6 +604,8 @@ function App:execute_command(cmd, params)
     self.deps.log("warn", "unknown action " .. tostring(params.ACTION))
   elseif cmd == "Refresh" then
     return self:_action_refresh()
+  elseif cmd == M.ATV_REFRESH_CMD then
+    return self:_action_refresh_atv()
   else
     self.deps.log("debug", "ExecuteCommand ignored: " .. tostring(cmd))
   end
@@ -612,6 +628,11 @@ function App:_get_artwork(params)
   end
   self.artwork:fetch(url, function(err, data)
     if err then return self:_artwork_reply({ url = url, error = tostring(err) }) end
+    -- the state moved on while downloading (new snapshot / source): never hand it out as current
+    if not self:_art_current(url) then
+      self.deps.log("debug", "GET_ARTWORK reply dropped (no longer in the current state): " .. url)
+      return self:_artwork_reply({ url = url, error = "not in current state" })
+    end
     self:_artwork_reply({ url = url, data = data })
   end)
 end
@@ -628,6 +649,7 @@ function App:_relay_artwork(url, cb)
     return err(403, "not in current state")
   end
   self.artwork:fetch(url, function(e, data)
+    if e == "cancelled" or (not e and not self:_art_current(url)) then return err(410, "not in current state") end
     if e then return err(e == "disabled" and 403 or 502, tostring(e)) end
     local mime, enc = tostring(data):match("^data:([^;,]+);base64,(.*)$")
     local bytes = enc and b64.decode(enc)
@@ -662,6 +684,13 @@ function App:on_watched_variable_changed(dev, var, value)
   if self.atv then self.atv:on_variable(dev, var, value) end
 end
 
+function App:on_device_event(dev, ev)
+  if self.destroyed or not self.atv then return end
+  if not self.atv:on_device_event(dev, ev) then
+    self.deps.log("debug", "OnDeviceEvent ignored: device " .. tostring(dev) .. " event " .. tostring(ev))
+  end
+end
+
 function App:on_server_data_in(h, data, address, port, identifier)
   if self.server then self.server:on_data(h, data, address, port, identifier) end
 end
@@ -685,6 +714,18 @@ function App:_action_refresh()
   end
   if self.engine.running then self.engine:refresh() end
   self:_out("Now Playing Info: refresh requested")
+end
+
+-- "Refresh Apple TV Now Playing": an immediate, forced re-read of the selected Apple TV driver's
+-- snapshot only (no provider polling). Re-applying an unchanged snapshot changes nothing in the
+-- engine, so it never causes a redraw when the REVISION listener already applied it.
+function App:_action_refresh_atv()
+  if not (self.info and self.info.appletv_driver and self.atv) then
+    self.deps.log("info", M.ATV_REFRESH_CMD .. ": no Apple TV driver selected")
+    return
+  end
+  if not self.atv.dev then self.atv:configure(self.info.appletv_driver) end
+  self.atv:read("command", true)
 end
 
 function App:_action_clear_cache()

@@ -7,7 +7,7 @@
   <model>Now Playing Info</model>
   <created>11/11/2026 12:00</created>
   <modified>11/11/2026 12:00</modified>
-  <version>10200</version>
+  <version>10300</version>
   <control>lua_gen</control>
   <controlmethod>IP</controlmethod>
   <driver>DriverWorks</driver>
@@ -237,6 +237,10 @@
       <command>
         <name>Refresh</name>
         <description>Refresh NAME now</description>
+      </command>
+      <command>
+        <name>Refresh Apple TV Now Playing</name>
+        <description>Refresh Apple TV Now Playing on NAME</description>
       </command>
     </commands>
   </config>

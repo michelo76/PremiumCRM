@@ -205,6 +205,8 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
 .progress-fill{position:absolute;left:0;top:0;width:100%;height:100%;background:var(--accent);-webkit-transform-origin:0 50%;transform-origin:0 50%;-webkit-transform:scaleX(0);transform:scaleX(0);transition:transform .5s linear}
 .no-bar .progress-bar{display:none}
 .is-paused .progress-fill{opacity:.55}
+.progress.is-stale .progress-fill{opacity:.35;transition:none}
+.progress.is-stale .progress-labels{opacity:.6}
 .progress-labels{display:flex;justify-content:space-between;align-items:center;margin-top:.65rem;font-size:.86rem;color:var(--fg3);font-variant-numeric:tabular-nums;white-space:nowrap}
 .progress-left,.progress-right{display:flex;align-items:center;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .progress-right{margin-left:1rem}
@@ -1179,10 +1181,28 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
     tick();
   }
 
+  // Progress while Playing is an ESTIMATE extrapolated from the source's last observation
+  // (position_s at position_updated_at; for the Apple TV driver: NOW_PLAYING_POSITION at
+  // NOW_PLAYING_UPDATED_AT). Only while playing; never while paused / buffering (seeking) /
+  // stopped / idle. Bounded: held at the duration, and at most EXTRAP_MAX_S past the observation;
+  // past either bound the estimate is stale: frozen, dimmed (.is-stale), no "Ends" time.
+  // Same rule as np/flatten.lua position() (MAX_EXTRAPOLATE_S).
+  var EXTRAP_MAX_S = 4 * 3600;
+  function progPos(P, now) {
+    var pos = P.pos || 0, stale = false;
+    if (P.state === 'playing' && P.at != null) {
+      var dt = Math.max(0, now - P.at);
+      if (dt > EXTRAP_MAX_S) { dt = EXTRAP_MAX_S; stale = true; }
+      pos += dt;
+      if (P.dur && pos >= P.dur) { pos = P.dur; stale = stale || dt > 0; }
+    }
+    if (P.dur) pos = clamp(pos, 0, P.dur);
+    return { pos: pos, stale: stale };
+  }
   var lastLabels = '';
   function tick() {
     if (mode !== 'np' || !prog) return;
-    var p = $('progress'), P = prog, frac = null, left = '', right = '', hidden = false;
+    var p = $('progress'), P = prog, frac = null, left = '', right = '', hidden = false, stale = false;
     var now = nowS() - skew;
     if (P.live) {
       if (P.ps && P.pe && P.pe > P.ps) {
@@ -1191,20 +1211,20 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
         var rem = Math.max(0, P.pe - now); right = fmtRuntime(Math.ceil(rem / 60) || 1) + ' left';
       }
     } else if (P.pos != null || P.dur) {
-      var pos = P.pos || 0;
-      if (P.state === 'playing' && P.at != null) pos += clamp(now - P.at, 0, 86400);
-      if (P.dur) pos = clamp(pos, 0, P.dur);
+      var pp = progPos(P, now), pos = pp.pos;
+      stale = pp.stale;
       left = fmtDur(pos);
       if (P.dur && P.dur > 0) {
         frac = pos / P.dur;
         var r = P.dur - pos;
         right = '−' + fmtDur(r);
-        if (P.state === 'playing' && r > 60) right += '  ·  Ends ' + fmtClock(new Date(Date.now() + r * 1000));
+        if (P.state === 'playing' && !stale && r > 60) right += '  ·  Ends ' + fmtClock(new Date(Date.now() + r * 1000));
       }
     } else hidden = true;
     if (P.live && !left) { hidden = false; }
     p.classList.toggle('is-hidden', hidden);
     p.classList.toggle('is-live', P.live);
+    p.classList.toggle('is-stale', stale);
     p.classList.toggle('no-bar', frac == null);
     if (frac != null) {
       var tf = 'scaleX(' + frac.toFixed(4) + ')', fill = $('progress-fill');

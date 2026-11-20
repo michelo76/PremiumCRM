@@ -20,6 +20,12 @@ generated artwork).
   A:set_auth({ { prefix = "http://bridge:8765/", headers = { Authorization = "Bearer ..." } } })
                             extra request headers for URLs under a prefix (Apple TV bridge token)
   A:set_enabled(bool) ; A:count() ; A:clear()
+  A:retain(set)             cancel downloads in flight for URLs NOT in set ({[url]=true}: the
+                            image URLs of the current state): their callers are answered
+                            "cancelled" at once and the late HTTP response is ignored (not
+                            cached, not delivered). Called by c4.app on every state change, so a
+                            source switch / new snapshot never gets an old download delivered.
+                            Each download carries a token; a cancelled one can be restarted.
   Artwork.is_lan(url) -> bool ; Artwork.sniff(body) -> mime | nil ; Artwork.host_of(url)
 ]]
 
@@ -94,6 +100,8 @@ function M.new(deps, opts)
     cache = {},      -- url -> { data = uri, used = n }
     failed = {},     -- url -> { at = retry_at, err = "..." }
     waiters = {},    -- url -> { cb, ... } while a download is in flight
+    tokens = {},     -- url -> token of the download in flight (late responses of others ignored)
+    seq = 0,
     gen = 0,
     tick = 0,
     stats = { ok = 0, failed = 0 },
@@ -143,6 +151,7 @@ end
 function A:_finish(url, err, data)
   local list = self.waiters[url] or {}
   self.waiters[url] = nil
+  self.tokens[url] = nil
   for _, cb in ipairs(list) do
     local ok, e = call(cb, err, data)
     if not ok then self.deps.log("error", "artwork callback failed: " .. tostring(e)) end
@@ -158,9 +167,17 @@ end
 
 function A:_download(url)
   local gen = self.gen
+  self.seq = self.seq + 1
+  local token = self.seq
+  self.tokens[url] = token
   self.deps.http.request({ method = "GET", url = url, timeout = self.timeout, headers = self:_headers(url) },
     function(err, resp)
       if gen ~= self.gen then return end -- cleared meanwhile (waiters were dropped with it)
+      if self.tokens[url] ~= token then -- cancelled by retain(): a late response, dropped
+        self.stats.late = (self.stats.late or 0) + 1
+        self.deps.log("debug", "late artwork response ignored (no longer current): " .. url)
+        return
+      end
       if err then return self:_fail(url, tostring(err)) end
       local status = tonumber(resp.status) or 0
       if status < 200 or status >= 300 then return self:_fail(url, "HTTP " .. status) end
@@ -208,11 +225,25 @@ function A:count()
   return n
 end
 
+-- Cancels downloads in flight for URLs not in `keep`; returns how many were cancelled.
+function A:retain(keep)
+  keep = keep or {}
+  local n = 0
+  for url, list in pairs(self.waiters) do
+    if not keep[url] then
+      self.waiters[url], self.tokens[url] = nil, nil
+      n = n + 1
+      for _, cb in ipairs(list) do call(cb, "cancelled") end
+    end
+  end
+  return n
+end
+
 -- Drops the cache; downloads in flight are answered "cancelled" (callbacks stay exactly-once).
 function A:clear()
   self.gen = self.gen + 1
   local pending = self.waiters
-  self.cache, self.failed, self.waiters = {}, {}, {}
+  self.cache, self.failed, self.waiters, self.tokens = {}, {}, {}, {}
   for url, list in pairs(pending) do
     for _, cb in ipairs(list) do call(cb, "cancelled") end
   end

@@ -16,22 +16,44 @@ The contract (from the Apple TV driver's author):
       NOW_PLAYING_UPDATED_AT   controller epoch seconds of the observation ("0" when cleared)
       NOW_PLAYING_VALID        "1" observed snapshot, "0" cleared (VALID=1 does not imply a title)
       NOW_PLAYING_REVISION     incremented per snapshot; resets when that driver's module reloads
-  * Event 19 "Now Playing snapshot updated" fires after every snapshot write (dealers can wire
-    it to our "Refresh" command); a change of NOW_PLAYING_REVISION is an equally good trigger.
+  * Event 19 "Now Playing snapshot updated" fires (C4:FireEvent(19), no payload) after every
+    snapshot write; a change of NOW_PLAYING_REVISION is an equally good trigger.
+  * Licensed and unrestricted builds ship as the SAME file (smartbuildos_appletv_native.c4z); their
+    display name / model may differ. Identification never looks at names: a device "is" an Apple
+    TV Native driver when it exposes NOW_PLAYING_REVISION. The accepted driver file names (only
+    used to FIND candidates) are M.C4Z_NAMES -- one line per variant (keep driver.xml's
+    DEVICE_SELECTOR <items> in step; tests/c4/appletv_spec.lua checks that).
+
+Observing event 19 (verified in Snap One's docs-driverworks-api, 7_event/_5-RegisterDeviceEvent.md
+and _4.1-OnDeviceEvent.md, both "Available in 2.9.0"): C4:RegisterDeviceEvent(deviceId, eventId)
+registers a driver for ANOTHER device's event; Director then calls OnDeviceEvent(firingDeviceId,
+eventId). C4:FireEvent itself (7_event/_3-FireEvent.md) only fires the event on the firing driver;
+it is not a broadcast. The docs note the API is meant for drivers "created in support of one
+another" (the event id must be known -- here it is part of the contract). So: event 19 is
+registered (guarded: a missing/failing API only logs) AND the REVISION variable listener stays the
+primary trigger; the programming command "Refresh Apple TV Now Playing" is the Composer fallback.
   * Not used on purpose: PLAYBACK_POSITION (a ~1/s local estimate; we extrapolate ourselves from
     POSITION + UPDATED_AT, same controller clock) and event 12 NOW_PLAYING_CHANGED (title only).
 
 Receiver rules implemented here: read the snapshot when connecting; re-read on every REVISION
-change (variable listener) and on Refresh; read REVISION before and after the fields and retry
+change (variable listener), on event 19 (OnDeviceEvent) and on Refresh; read REVISION before and after the fields and retry
 when it moved (MAX_TRIES; a read that never settles is NOT published -- it is retried RETRY_S
 later, and the next REVISION notification triggers a read anyway); VALID=0 clears what is shown; a
 REVISION lower than the last applied one is a driver restart (variable ids may have changed: the
-name map is rebuilt and the listener re-registered). A failed or implausible read (REVISION not a
+name map is rebuilt and the listener re-registered). The SAME revision with different content
+(a reset that landed on the applied number, seen by the safety poll or event 19) is confirmed by
+a second read RETRY_S later and then applied as a restart. A failed or implausible read (REVISION not a
 number, VALID not 0/1: a stale name map) also rebuilds the map once. A safety poll (POLL_S)
 rebuilds the name map and re-reads REVISION in case a notification was missed or the ids moved.
 
 Staleness: when the Apple TV driver stops updating while VALID=1 we cannot tell (a paused movie
 legitimately produces no updates), so the last snapshot stays until it is cleared or replaced.
+Position extrapolation while Playing is bounded instead (np.flatten.MAX_EXTRAPOLATE_S, the page's
+EXTRAP_MAX_S): never past the duration, never more than 4 h past UPDATED_AT.
+
+Numbers (POSITION, DURATION, UPDATED_AT, SEASON, EPISODE, REVISION) are parsed strictly: plain
+decimal (optionally with a fraction / exponent), no sign, no hex, no nan/inf, within a plausible
+range; anything else is "unknown" (nil), never an error and never a negative/NaN/inf value.
 
 Pure helpers
   AppleTV.to_playback(snap, opts) -> playback (np.playback shape)
@@ -47,6 +69,7 @@ Watcher (C4 injected)
   w:configure({ selected = n, override = n, name = "..." } | nil)   (idempotent)
   w:stop()
   w:on_variable(idDevice, idVariable, strValue) -> true when handled
+  w:on_device_event(idDevice, idEvent) -> true when handled (event 19 of the device being read)
   w:read(reason, force)   re-read now (force: re-apply even when REVISION is unchanged); never
                           re-entrant (a read requested during a read runs right after it)
   w:playback()            the current playback (an "off" playback while nothing is resolved)
@@ -61,6 +84,7 @@ C4 APIs (Snap One DriverWorks API reference, docs-driverworks-api):
                                               {[NAME]={id=|value=}} and {[NAME]=value}
             C4:GetDeviceVariable(dev, varId) / C4:RegisterVariableListener / UnregisterVariableListener
             C4:GetDeviceDisplayName(id)
+            C4:RegisterDeviceEvent / UnregisterDeviceEvent(dev, 19)   7_event/_5, _7 (2.9.0)
             (all calls go through W:_call: a missing API or an error is "not available")
   optional  C4:GetDevicesByC4iName(c4z)      25_proxy/_4 (1.6.0): table of device ids
   (guarded) C4:GetDevices({DeviceIds=...} | {C4iNames=...})   22_miscellaneous/_9 (2.10.0): a
@@ -74,7 +98,16 @@ local playback_mod = require("np.playback")
 
 local M = {}
 
-M.C4Z = "smartbuildos_appletv_native.c4z"
+-- Driver file names used to FIND Apple TV Native devices (GetDevicesByC4iName / GetDevices).
+-- Licensed and unrestricted builds are both packaged as smartbuildos_appletv_native.c4z; a
+-- variant with another file name is one more line here (+ driver.xml DEVICE_SELECTOR <items>).
+-- The Device ID override and the selector work for any file name: what identifies the driver is
+-- the NOW_PLAYING_REVISION variable, never a name or model string.
+M.C4Z_NAMES = {
+  "smartbuildos_appletv_native.c4z",
+}
+M.C4Z = M.C4Z_NAMES[1]
+M.EVENT_ID = 19 -- "Now Playing snapshot updated"
 M.PREFIX = "NOW_PLAYING_"
 M.FIELDS = { "TITLE", "SERIES", "SEASON", "EPISODE", "ARTIST", "ALBUM", "APP_NAME", "APP_ID", "PLAY_STATE",
   "POSITION", "DURATION", "ARTWORK_URL", "UPDATED_AT", "VALID" }
@@ -82,6 +115,9 @@ M.REVISION = "REVISION"
 M.POLL_S = 30
 M.MAX_TRIES = 3
 M.MOVIE_MIN_DURATION_S = 60 * 60 -- same threshold as the pyatv bridge (bridge/atv_bridge/mapping.py)
+M.MAX_SECONDS = 30 * 86400        -- POSITION / DURATION beyond this are implausible -> unknown
+M.MAX_EPOCH = 1e10                -- UPDATED_AT beyond this (year 2286) is implausible -> unknown
+M.MAX_COUNT = 1e6                 -- season / episode numbers beyond this -> unknown
 
 M.STATES = {
   playing = "playing", paused = "paused", stopped = "stopped", seeking = "buffering",
@@ -108,21 +144,30 @@ local function s(v)
   return v
 end
 
+-- A plain non-negative decimal number ("12", " 12 ", "12.5", ".5", "1e3"); anything else
+-- ("-5", "0x10", "nan", "inf", "1e400", "", "abc", "1.2.3") -> nil. Never NaN, inf or negative.
+local function decimal(v, max)
+  v = s(v)
+  if not v then return nil end
+  local mant = v:match("^([%d%.]+)[eE][+]?%d+$") or v:match("^([%d%.]+)$")
+  if not mant or not mant:find("%d") or mant:find("%..*%.") then return nil end
+  local n = tonumber(v)
+  if not n or n ~= n or n < 0 or n == math.huge or (max and n > max) then return nil end
+  return n
+end
+M.decimal = decimal
+
 local function count(v)
-  -- season / episode numbers: tonumber of a plain non-negative integer ("2", "02", "2.0");
-  -- anything else ("S2", "2a", "2.5", "") -> nil. Season 0 (specials) is a real number.
+  -- season / episode numbers: a plain non-negative integer ("2", "02", "2.0");
+  -- anything else ("S2", "2a", "2.5", "", "1e3", "0x2") -> nil. Season 0 (specials) is a real number.
   v = s(v)
   if not v or not v:find("^%d+%.?0*$") then return nil end
-  local n = tonumber(v)
-  if not n or n < 0 then return nil end
+  local n = decimal(v, M.MAX_COUNT)
+  if not n then return nil end
   return math.floor(n)
 end
 
-local function seconds(v)
-  local n = tonumber(s(v) or "")
-  if not n or n ~= n or n < 0 or n == math.huge then return nil end
-  return n
-end
+local function seconds(v) return decimal(v, M.MAX_SECONDS) end
 
 function M.looks_like_bundle_id(v)
   return type(v) == "string" and v:find("^[%w%-_]+%.[%w%-_]+%.[%w%-_%.]+$") ~= nil
@@ -153,7 +198,7 @@ function M.to_playback(snap, opts)
   if duration == 0 then duration = nil end
   local position = seconds(snap.POSITION)
   if position == 0 and not duration then position = nil end -- both unknown
-  local updated = seconds(snap.UPDATED_AT)
+  local updated = decimal(snap.UPDATED_AT, M.MAX_EPOCH)
   if updated == 0 then updated = nil end
 
   -- the pyatv bridge's heuristic: an active session with a title but no duration looks live
@@ -262,7 +307,7 @@ function M.plausible(snap)
   local v = s(snap.VALID)
   if v ~= nil and v ~= "0" and v ~= "1" then return false, "NOW_PLAYING_VALID = " .. tostring(snap.VALID) end
   local u = s(snap.UPDATED_AT)
-  if u ~= nil and not tonumber(u) then return false, "NOW_PLAYING_UPDATED_AT = " .. tostring(snap.UPDATED_AT) end
+  if u ~= nil and not decimal(u) then return false, "NOW_PLAYING_UPDATED_AT = " .. tostring(snap.UPDATED_AT) end
   return true
 end
 
@@ -276,7 +321,8 @@ W.__index = W
 M.RETRY_S = 1 -- a read torn MAX_TRIES times in a row is retried this much later
 
 function M.new(C4, deps, on_change)
-  return setmetatable({ C4 = C4, deps = deps, on_change = on_change, status = "Not configured", restarts = 0 }, W)
+  return setmetatable({ C4 = C4, deps = deps, on_change = on_change, status = "Not configured", restarts = 0,
+    epoch = 0 }, W)
 end
 
 function W:_log(level, msg) self.deps.log(level, "Apple TV driver: " .. msg) end
@@ -314,11 +360,13 @@ end
 -- GetDevices entries carrying a `protocol` sub-table are proxies and skipped)
 function W:_installed()
   local out, seen = {}, {}
-  local ok, v = self:_call("GetDevicesByC4iName", M.C4Z)
-  if ok then
-    for _, id in ipairs(M.ids(v)) do if not seen[id] then seen[id] = true; out[#out + 1] = id end end
+  for _, c4z in ipairs(M.C4Z_NAMES) do
+    local ok, v = self:_call("GetDevicesByC4iName", c4z)
+    if ok then
+      for _, id in ipairs(M.ids(v)) do if not seen[id] then seen[id] = true; out[#out + 1] = id end end
+    end
   end
-  local ok2, t = self:_call("GetDevices", { C4iNames = M.C4Z })
+  local ok2, t = self:_call("GetDevices", { C4iNames = table.concat(M.C4Z_NAMES, ",") })
   if ok2 and type(t) == "table" then
     for k, e in pairs(t) do
       local id = tonumber(k)
@@ -420,7 +468,7 @@ function W:_resolve()
   end
   if #cands == 1 then
     return cands[1], self:_contract_map(cands[1]),
-      "the only " .. M.C4Z .. " device in the project (device " .. first .. " is not one)"
+      "the only " .. table.concat(M.C4Z_NAMES, "/") .. " device in the project (device " .. first .. " is not one)"
   end
   if #cands > 1 then
     local ids = {}
@@ -469,9 +517,36 @@ function W:_unlisten()
   self.listen_key, self.listen_dev, self.listen_var = nil, nil, nil
 end
 
+-- event 19 of the device being read (C4:RegisterDeviceEvent, OS 2.9.0+; guarded: without it the
+-- REVISION listener, the safety poll and the Composer-wired command still work)
+function W:_watch_event(force)
+  local dev = self.dev
+  if dev == self.event_dev and not force then return end
+  self:_unwatch_event()
+  if not dev then return end
+  local ok, err = self:_call("RegisterDeviceEvent", dev, M.EVENT_ID)
+  if ok then
+    self.event_dev = dev
+  else
+    self.event_dev = nil
+    if self.event_warned ~= dev then
+      self.event_warned = dev
+      self:_log("info", "event " .. M.EVENT_ID .. " not subscribed (" .. tostring(err) ..
+        "): relying on the NOW_PLAYING_REVISION listener / the \"Refresh Apple TV Now Playing\" command")
+    end
+  end
+end
+
+function W:_unwatch_event()
+  if self.event_dev then self:_call("UnregisterDeviceEvent", self.event_dev, M.EVENT_ID) end
+  self.event_dev = nil
+end
+
 function W:_cancel_timers()
   if self.timer then self.timer:cancel(); self.timer = nil end
   if self.retry then self.retry:cancel(); self.retry = nil end
+  if self.confirm then self.confirm:cancel(); self.confirm = nil end
+  self.suspect = nil
 end
 
 function W:_arm()
@@ -491,7 +566,9 @@ function W:_connect(reason)
     local had = self.dev ~= nil or self.snap ~= nil
     if self.dev then self:_log("warn", "lost the Apple TV driver device " .. self.dev .. ": " .. tostring(how)) end
     self:_unlisten()
+    self:_unwatch_event()
     self.dev, self.map, self.how, self.applied_rev, self.snap = nil, nil, nil, nil, nil
+    self.epoch = (self.epoch or 0) + 1
     if how ~= self.last_problem then self:_log("warn", how) end
     self.last_problem = how
     self:_set_status(how, had) -- what was shown is gone: always tell the app
@@ -501,10 +578,21 @@ function W:_connect(reason)
   if dev ~= self.dev then
     self:_log("info", "using " .. label(self, dev) .. ": " .. how .. (reason and (" [" .. reason .. "]") or ""))
     self.applied_rev, self.snap = nil, nil
+    self.epoch = (self.epoch or 0) + 1
+    if self.confirm then self.confirm:cancel(); self.confirm = nil end
+    self.suspect = nil
   end
   self.dev, self.map, self.how = dev, map, how
   self:_listen()
+  self:_watch_event()
   return true
+end
+
+-- the content of a snapshot (every field, in contract order)
+function M.fingerprint(snap)
+  local t = {}
+  for i, f in ipairs(M.FIELDS) do t[i] = tostring(snap and snap[f] or "") end
+  return table.concat(t, "\0")
 end
 
 local function same_map(a, b)
@@ -524,6 +612,7 @@ function W:_remap(force_listen)
   if changed then self:_log("info", "variable ids of device " .. self.dev .. " changed: map rebuilt") end
   self.map = map
   self:_listen(force_listen)
+  self:_watch_event(force_listen or changed) -- new ids = that driver reloaded: subscribe afresh
   return true, changed
 end
 
@@ -619,9 +708,39 @@ function W:_read(reason, force)
       return false
     end
   end
-  if rev == self.applied_rev and not force then return true end
+  if rev == self.applied_rev and not force then
+    if self.snap and M.fingerprint(snap) ~= M.fingerprint(self.snap) then return self:_suspect(snap, rev, reason) end
+    self.suspect = nil
+    return true
+  end
+  self.suspect = nil
   self:_apply(snap, rev, reason)
   return true
+end
+
+-- The applied REVISION number with different content: a module reload whose fresh counter landed
+-- on our number (or a read in the middle of a write). Confirmed by a second read RETRY_S later
+-- (same revision, same content) before it is applied as a restart; at most MAX_TRIES checks.
+function W:_suspect(snap, rev, reason)
+  local fp = M.fingerprint(snap)
+  local sus = self.suspect
+  if sus and sus.rev == rev and sus.fp == fp and sus.epoch == self.epoch then
+    self.suspect = nil
+    self.restarts = self.restarts + 1
+    self:_log("info", "revision " .. rev .. " re-used with different content: the Apple TV driver restarted")
+    self:_apply(snap, rev, reason)
+    return true
+  end
+  local tries = (sus and sus.rev == rev and sus.epoch == self.epoch) and (sus.tries + 1) or 1
+  if tries > M.MAX_TRIES then self.suspect = nil; return false end
+  self.suspect = { rev = rev, fp = fp, tries = tries, epoch = self.epoch }
+  if not self.confirm then
+    self.confirm = self.deps.set_timer(M.RETRY_S, function()
+      self.confirm = nil
+      if self.suspect then self:read("confirm revision " .. rev) end
+    end)
+  end
+  return false
 end
 
 -- Read now. force: re-apply even when REVISION is unchanged. Never re-entrant: a read asked for
@@ -673,6 +792,8 @@ end
 function W:stop()
   self:_cancel_timers()
   self:_unlisten()
+  self:_unwatch_event()
+  self.epoch = (self.epoch or 0) + 1
   local was = self.opts ~= nil
   self.opts, self.dev, self.map, self.how, self.applied_rev, self.snap, self.last_problem = nil, nil, nil, nil, nil, nil, nil
   self.again = nil
@@ -687,6 +808,17 @@ function W:on_variable(dev, var, value)
   local rev = rev_of(value)
   if rev and self.applied_rev and rev == self.applied_rev then return true end
   self:read("revision " .. tostring(value))
+  return true
+end
+
+-- OnDeviceEvent(firingDeviceId, eventId): event 19 of the device being read -> read now. Not
+-- forced: an unchanged revision with unchanged content is a no-op (no duplicate redraw when the
+-- REVISION listener already applied it); anything else (another device / event, a late event
+-- from the previous selection) is ignored.
+function W:on_device_event(dev, ev)
+  dev, ev = tonumber(dev), tonumber(ev)
+  if not self.opts or not self.dev or dev ~= self.dev or ev ~= M.EVENT_ID then return false end
+  self:read("event " .. M.EVENT_ID)
   return true
 end
 
@@ -718,7 +850,7 @@ function W:report()
     local ids = self:_installed()
     local t = {}
     for _, id in ipairs(ids) do t[#t + 1] = id .. " (" .. tostring(self:_name_of(id)) .. ")" end
-    lines[2] = "    " .. M.C4Z .. " devices in the project: " .. (#t > 0 and table.concat(t, ", ") or "none found")
+    lines[2] = "    " .. table.concat(M.C4Z_NAMES, "/") .. " devices in the project: " .. (#t > 0 and table.concat(t, ", ") or "none found")
     return lines, false
   end
   local found, missing = { full(M.REVISION) }, {}
@@ -730,7 +862,8 @@ function W:report()
     label(self, self.dev) .. ", " .. tostring(self.how)
   lines[#lines + 1] = "    variables found: " .. #found .. "/" .. (#M.FIELDS + 1) ..
     (#missing > 0 and (" (missing: " .. table.concat(missing, ", ") .. ")") or " (all)") ..
-    (self.listen_var and (", listening on NOW_PLAYING_REVISION (variable " .. self.listen_var .. ")") or "")
+    (self.listen_var and (", listening on NOW_PLAYING_REVISION (variable " .. self.listen_var .. ")") or "") ..
+    (self.event_dev and (", event " .. M.EVENT_ID .. " subscribed") or (", event " .. M.EVENT_ID .. " not subscribed"))
   lines[#lines + 1] = "    revision " .. tostring(snap.REVISION or "?") .. ", VALID=" .. tostring(snap.VALID or "?") ..
     ", state " .. tostring(s(snap.PLAY_STATE) or "-") .. (s(snap.TITLE) and (", title \"" .. snap.TITLE .. "\"") or "") ..
     (s(snap.APP_NAME) and (", app " .. snap.APP_NAME) or "")

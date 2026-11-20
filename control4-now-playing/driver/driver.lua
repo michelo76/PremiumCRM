@@ -53,6 +53,12 @@ function OnWatchedVariableChanged(idDevice, idVariable, strValue)
   call("on_watched_variable_changed", idDevice, idVariable, strValue)
 end
 
+-- Another device's event registered with C4:RegisterDeviceEvent (OS 2.9.0+): the Apple TV
+-- driver's event 19 "Now Playing snapshot updated".
+function OnDeviceEvent(firingDeviceId, eventId)
+  call("on_device_event", firingDeviceId, eventId)
+end
+
 -- OS 3.3.1+ appends the client address / port and the identifier given to C4:CreateServer.
 function OnServerDataIn(nHandle, strData, strAddress, nPort, strIdentifier)
   call("on_server_data_in", nHandle, strData, strAddress, nPort, strIdentifier)

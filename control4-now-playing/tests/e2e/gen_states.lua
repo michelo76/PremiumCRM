@@ -15,6 +15,9 @@ and writes exactly what the web page would receive:
                              (?inm=<etag> -> 304), unauthorized (no k -> 401), options (204),
                              artwork = { [url] = 200 with the image bytes } }
   <out>/index.json           scenario list + the mock clock
+  <out>/atv_seq.json         { steps = [ STATE_JSON, ... ] }: one open page, the SmartBuildOS Apple TV
+                             driver source over time (playing with artwork -> same title, artwork
+                             cleared + paused -> VALID=0), replayed by render.js
 
   lua5.1 tests/e2e/gen_states.lua <out_dir>          (also: luajit)
 
@@ -283,6 +286,56 @@ for _, sc in ipairs(SCENARIOS) do
     state = st.playback.state, kind = st.media.kind, bytes = #sj, lan_images = #lan, pre = pre and true or nil }
   io.write(string.format("%-11s v%-3d %-8s %-8s %6d bytes  %s\n", sc.name, st.version, st.playback.state,
     st.media.kind, #sj, sc.desc))
+  m:destroy()
+end
+
+-- The Apple TV driver source over time on ONE open page (render.js runAtvLifecycle): the exact
+-- states the real driver publishes for: playing with artwork -> same title, ARTWORK_URL cleared
+-- and Paused -> VALID=0 (disconnect). No metadata keys: no enrichment poster.
+do
+  local m = new({ ["Apple TV Driver"] = "300", ["Music Lookup"] = "Off" })
+  local function vals(t)
+    local v = { NOW_PLAYING_TITLE = "", NOW_PLAYING_SERIES = "", NOW_PLAYING_SEASON = "", NOW_PLAYING_EPISODE = "",
+      NOW_PLAYING_ARTIST = "", NOW_PLAYING_ALBUM = "", NOW_PLAYING_APP_NAME = "", NOW_PLAYING_APP_ID = "",
+      NOW_PLAYING_PLAY_STATE = "", NOW_PLAYING_POSITION = "0", NOW_PLAYING_DURATION = "0", NOW_PLAYING_ARTWORK_URL = "",
+      NOW_PLAYING_UPDATED_AT = "0", NOW_PLAYING_VALID = "0", NOW_PLAYING_REVISION = "0" }
+    for k, x in pairs(t) do v["NOW_PLAYING_" .. k] = x end
+    return v
+  end
+  local playing = { TITLE = "Forks", SERIES = "The Bear", SEASON = "2", EPISODE = "7", APP_NAME = "Hulu",
+    APP_ID = "com.hulu.plus", PLAY_STATE = "Playing", POSITION = "754", DURATION = "2280",
+    ARTWORK_URL = "https://img.example.com/atv/bear-s2e7.jpg", VALID = "1" }
+  m:dyn_device(300, "Den Apple TV", vals({}), { c4i = "smartbuildos_appletv_native.c4z" })
+  local rev = 0
+  local function snapshot(t)
+    rev = rev + 1
+    local v = vals(t)
+    v.NOW_PLAYING_UPDATED_AT = t.VALID == "1" and tostring(math.floor(m.t)) or "0"
+    v.NOW_PLAYING_REVISION = tostring(rev)
+    local names = {}
+    for k in pairs(v) do if k ~= "NOW_PLAYING_REVISION" then names[#names + 1] = k end end
+    table.sort(names)
+    names[#names + 1] = "NOW_PLAYING_REVISION" -- written last, like the Apple TV driver
+    m:set_named_many(300, v, names)
+  end
+  m:activate()
+  snapshot(playing)
+  m:start(); m:advance(3)
+  local steps = json.array({})
+  steps[1] = m.vars.STATE_JSON
+  local paused = {}
+  for k, x in pairs(playing) do paused[k] = x end
+  paused.ARTWORK_URL, paused.PLAY_STATE, paused.POSITION = "", "Paused", "800"
+  m:advance(46); snapshot(paused); m:advance(2)
+  steps[2] = m.vars.STATE_JSON
+  m:advance(10); snapshot({ VALID = "0" }); m:advance(2)
+  steps[3] = m.vars.STATE_JSON
+  assert(#m.errors == 0, "atv_seq: driver errors:\n" .. table.concat(m.errors, "\n"))
+  local a, b, c = json.decode(steps[1]), json.decode(steps[2]), json.decode(steps[3])
+  assert(a.media.artwork_url == playing.ARTWORK_URL and a.playback.state == "playing", "atv_seq: step 1")
+  assert(b.media_key == a.media_key and b.media.artwork_url == nil and b.playback.state == "paused", "atv_seq: step 2")
+  assert(c.playback.state == "idle" and c.media.title == nil and c.media.artwork_url == nil, "atv_seq: step 3")
+  write(OUT .. "/atv_seq.json", json.encode({ steps = steps }))
   m:destroy()
 end
 

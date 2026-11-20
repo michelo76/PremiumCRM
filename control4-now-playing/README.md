@@ -152,7 +152,7 @@ node tools/mock-server/server.js --port 8099
 | Source | App | Title | Episode / S·E | Artist/album | Play/pause | Position/duration | Artwork | Notes |
 |---|---|---|---|---|---|---|---|---|
 | Roku ECP | yes | **no** | no | no | yes | yes | app icon | Roku TV tuner: channel + program (guide data). Needs "Control by mobile apps" = Default/Permissive |
-| Apple TV driver (SmartBuildOS, variables) | yes | if the app publishes it | often (series/S/E) | yes (Music) | yes (Unknown → idle) | yes (position at the last observation, extrapolated) | only when the app reports an HTTPS URL | local, no pairing; kind is inferred (no type field) |
+| Apple TV driver (SmartBuildOS, variables) | yes | if the app publishes it | often (series/S/E) | yes (Music) | yes (Unknown → idle) | yes (position at the last observation; an estimate while Playing, bounded — see below) | only when the app reports an HTTPS URL | local, no pairing; kind is inferred (no type field) |
 | Apple TV bridge (pyatv) | yes | if the app publishes it | often | yes (Music) | yes | yes | yes (LAN URL; relayed for remote apps) | some DRM/live apps publish nothing; `movie`/`live_tv` are heuristics |
 | Home Assistant | often | yes | yes | yes | yes | yes | yes (LAN proxy; relayed for remote apps) | the catch-all (Sonos, Plex, Kodi, Chromecast, Android TV, Roku titles…) |
 | Control4 room media | no | yes | no | yes | **no** (shown as playing while room on) | no | sometimes (base64 `<img>` / IMAGEURL) | 1031 XML undocumented; music shape confirmed by a live capture (`<mediatype>`, `<deviceid>`); tolerant parser |
@@ -170,8 +170,8 @@ driver source and the bridge are both "the Apple TV").
 ## Apple TV driver source (SmartBuildOS Apple TV Native)
 
 **Setup.** Needs **SmartBuildOS Apple TV Native Beta 120 or later**
-(`smartbuildos_appletv_native.c4z`) in the same project. Select it in **Apple TV Driver** (a
-device selector filtered to that driver); optionally set **Apple TV Name**. No second pairing, no
+(`smartbuildos_appletv_native.c4z`) in the same project — the licensed or the unrestricted build.
+Select it in **Apple TV Driver** (a device selector filtered to that driver); optionally set **Apple TV Name**. No second pairing, no
 bridge, no network traffic: both drivers run on the same controller. **Apple TV Driver Status**
 (read-only) shows the device being read and the snapshot revision, or why it cannot be read.
 If the selector offers/stores one of the driver's child proxies, the main device is found
@@ -193,10 +193,64 @@ event 12 (title only).
 **How it is read** (`driver/c4/appletv.lua`). Variable ids are never hard-coded: they are
 resolved by exact name from `C4:GetDeviceVariables(device)` (several table shapes accepted) and
 re-resolved when a read fails, a value is implausible (REVISION not a number, VALID not 0/1),
-REVISION goes backwards (a restart) or on the 30 s safety poll. A listener on `NOW_PLAYING_REVISION`
-(`C4:RegisterVariableListener`) triggers reads; every read is REVISION → all fields → REVISION,
-retried up to 3 times while it moves — a torn snapshot is never published (retried 1 s later).
-Unchanged revisions are ignored; Refresh / Refresh Now force a re-read. The snapshot is pushed into
+REVISION goes backwards (a restart) or on the 30 s safety poll. Reads are triggered by a listener on
+`NOW_PLAYING_REVISION` (`C4:RegisterVariableListener`), by the Apple TV driver's event 19 (see
+below), by the programming command **Refresh Apple TV Now Playing**, by Refresh / Refresh Now, and
+immediately at driver start, on every selection change and on reconnection (re-resolved device /
+re-registered listener). Every read is REVISION → all fields → REVISION, retried up to 3 times while
+it moves — a torn snapshot is never published (retried 1 s later). An unchanged revision with
+unchanged content is ignored, so the listener, event 19 and the command arriving for the same
+snapshot cause **one** redraw (tested: state version, `STATE_JSON` writes and DataToUI pushes stay
+flat). Revision resets: a lower REVISION is a restart (ids re-resolved, listener/event re-registered);
+the *same* number with different content (a reset that landed on our number) is confirmed by a
+second read 1 s later and then applied. Refresh / the command force a re-apply (the engine
+publishes nothing when nothing changed).
+
+**Observing event 19 — what DriverWorks supports** (checked in Snap One's
+[docs-driverworks-api](https://github.com/snap-one/docs-driverworks-api), `source/includes/7_event/`):
+`C4:FireEvent(id)` (`_3-FireEvent.md`) fires an event *on the calling driver* — it is not a
+broadcast to other drivers. A driver can subscribe to **another device's** event with
+`C4:RegisterDeviceEvent(deviceId, eventId)` (`_5-RegisterDeviceEvent.md`, "Available in 2.9.0"),
+receiving `OnDeviceEvent(firingDeviceId, eventId)` (`_4.1-OnDeviceEvent.md`); undone with
+`C4:UnregisterDeviceEvent` / `UnregisterAllDeviceEvents` (`_7`, `_6`). The doc notes it needs the
+event id to be known and targets "drivers created in support of one another" (the id is part of the
+contract here). `C4:RegisterSystemEvent` / `OnSystemEvent` (`_5.5`, `_4.2`, `_1-RegisteringforSystemEvents.md`)
+cover system events only (OnPIP, device online/offline, bindings…), not a driver's own events.
+Variable changes: `C4:RegisterVariableListener` / `OnWatchedVariableChanged`
+(`36_variable/_10`, `_9`, 1.6.0). So this driver uses **both**: `RegisterDeviceEvent(<main device>, 19)`
+(guarded — a missing or failing API is logged and the rest works) and the REVISION listener; both are
+moved to the new device on a selection change and dropped on removal/destroy; late events from a
+previous selection are ignored. The **Refresh Apple TV Now Playing** programming command remains
+for Composer wiring if a controller turns out not to deliver either: Programming → select the Apple
+TV driver's main device → event **Now Playing snapshot updated** → actions: this driver → Device
+Specific Command → **Refresh Apple TV Now Playing**. It is **optional** while the REVISION listener
+(or event subscription) works — Apple TV Driver Status shows the revision advancing.
+
+**Licensed vs unrestricted builds.** Both ship as `smartbuildos_appletv_native.c4z`; their display
+name / model may differ. Nothing here keys off a name or model: a device is accepted as an Apple TV
+Native driver when it exposes `NOW_PLAYING_REVISION` (by name). The driver file names used to
+*find* candidates (selector filter, proxy → main-device search) are one list,
+`AppleTV.C4Z_NAMES` in `driver/c4/appletv.lua` (one entry today; a variant under another file name
+is one line there plus the matching `<item>` in driver.xml's **Apple TV Driver** selector — a test
+keeps the two equal). **Apple TV Driver Device ID** works for any file name.
+
+**Artwork rules.** Only `NOW_PLAYING_ARTWORK_URL` when it is `https://`; when it clears, the image
+is removed (page shows generated art), never kept. "Not inventing artwork" refers to this field: with
+TMDB / iTunes keys the page can show a poster from those metadata providers — legitimate, separate
+enrichment, labelled as such in the details. Driver-side downloads (`GET_ARTWORK`, LAN
+`/api/artwork`) of images that leave the state (new snapshot, other source, source removed) are
+cancelled (`Artwork:retain`, per-URL download token); a late response is neither cached nor
+delivered (GET_ARTWORK answers `not in current state`, the relay 410), and a URL absent from the
+current state is never served from the cache.
+
+**Progress rule.** `POSITION` is the position at the last observation (`UPDATED_AT`). **Progress
+shown while Playing is an estimate extrapolated from the Apple TV driver's last observation** (page
+and `POSITION_SECONDS` / `PROGRESS_PERCENT`). Only while Playing — never while paused, seeking
+(buffering), stopped, idle or cleared. Bounded: held at the duration; at most 4 h past `UPDATED_AT`
+(`np.flatten.MAX_EXTRAPOLATE_S`, page `EXTRAP_MAX_S`); beyond either the estimate is *stale*: frozen,
+dimmed, no "Ends" time. Numbers (`POSITION`, `DURATION`, `UPDATED_AT`, `SEASON`, `EPISODE`,
+`REVISION`) are parsed strictly (plain non-negative decimal, no hex/nan/inf/sign, plausible range);
+anything else is unknown, never an error, never negative/NaN/inf in state or JSON. The snapshot is pushed into
 the `static` provider `appletv_driver` (provider name `appletv`, ordered before the bridge).
 
 Mapping: Playing→playing, Paused→paused, Stopped→stopped, Seeking→buffering,
@@ -219,8 +273,22 @@ ambiguous (set the Device ID). Everything is logged and shown in **Apple TV Driv
 only when the app reports an HTTPS URL. The media kind is a heuristic. `Unknown` is shown as idle.
 A stalled Apple TV driver (still `VALID=1`, no more updates) cannot be told apart from a long
 pause: the last snapshot stays until it is cleared or replaced.
-**Programming tip:** wire the Apple TV driver's event 19 "Now Playing snapshot updated" to this
-driver's **Refresh** command for belt-and-braces updates (the REVISION listener normally suffices).
+A deleted Apple TV driver is noticed by the 30 s safety poll (then: off, artwork gone,
+subscriptions dropped); clearing the selection clears the display immediately.
+
+**Requires controller validation (this integration)** — not provable without a real controller:
+1. `C4:RegisterDeviceEvent(<Apple TV main device>, 19)` actually delivers `OnDeviceEvent` for an
+   unrelated driver's `C4:FireEvent(19)` (Lua output, Debug Mode = Print: "snapshot N (event 19)").
+2. `RegisterVariableListener` on `NOW_PLAYING_REVISION` fires on every write, and whether listener
+   and event registrations survive an Apple TV driver update/reload (else: the 30 s poll recovers).
+3. The `C4:GetDeviceVariables` table shape and that the ids resolved by name read the right values.
+4. What the DEVICE_SELECTOR stores (main device or a proxy) and that it lists **both** the
+   licensed and the unrestricted build (same c4z name).
+5. That Composer offers **Refresh Apple TV Now Playing** under the Apple TV driver's "Now Playing
+   snapshot updated" event, and it re-reads (Apple TV Driver Status revision).
+6. Controller clock: `UPDATED_AT` and our `now()` are the same controller clock (extrapolation).
+7. Artwork: `GET_ARTWORK` of an HTTPS Apple TV artwork URL from a remote Navigator; old image gone
+   when the URL clears (page).
 
 ## Page ↔ driver protocol
 
@@ -345,7 +413,11 @@ room power gating, the Apple TV driver source (mapping table, initial read, revi
 same-title seeks without Media Changed, VALID=0, torn reads never published, restart with re-numbered
 variable ids, proxy → main device, older beta / unrelated / deleted device, manual override,
 ambiguity, name-keyed variable tables, TMDB enrichment, bridge fallback, Refresh, diagnostics,
-listener/timer counts across reconfiguration and destroy), LAN HTTP server (GET /, /api/state 200 → 304, 404, 405, HEAD, split chunks,
+listener/timer counts across reconfiguration and destroy; 1.3.0: event 19 via
+`RegisterDeviceEvent`/`OnDeviceEvent`, the "Refresh Apple TV Now Playing" command, one redraw for
+listener + event + command, same-revision resets, same-title artwork/state changes, disconnect
+clearing, our restart, junk numbers, licensed / unrestricted / other-file-name variants, source
+switching with late artwork responses, other sources unchanged), LAN HTTP server (GET /, /api/state 200 → 304, 404, 405, HEAD, split chunks,
 413), the LAN relay (token mint/persist/redaction, 401, `/api/artwork` bytes / 403 / 502, `?inm=`,
 OPTIONS, `CreateServer` false-return + backoff retry, legacy 1-argument fallback, identifier
 filtering, `DestroyServer(port)`, 10 s idle close, async answers dropped after a disconnect),
@@ -415,14 +487,16 @@ notifications sent before the project finishes starting are lost.
     `GetDevices` list the SmartBuildOS main device under its c4z name, what the DEVICE_SELECTOR
     stores for a multi-proxy driver (main device or a proxy), whether listeners survive that
     driver's reload, and that variable writes of another driver are delivered to
-    `OnWatchedVariableChanged` asynchronously (a synchronous delivery is handled too).
+    `OnWatchedVariableChanged` asynchronously (a synchronous delivery is handled too). 1.3.0: that
+    `C4:RegisterDeviceEvent` delivers the Apple TV driver's event 19 (`OnDeviceEvent`) and the
+    "Refresh Apple TV Now Playing" command — see "Requires controller validation" in that section.
 
 ### First install on a real controller — checklist
 
 Ordered by risk; each step names how to see the answer.
 
 1. **Driver loads (dotted `require`)** — add the c4z; Lua output must show `Now Playing Info
-   1.2.0 … started` (Debug Mode = Print). If you see `failed to load c4.app: module 'np.engine'
+   1.3.0 … started` (Debug Mode = Print). If you see `failed to load c4.app: module 'np.engine'
    not found`, dotted requires do not resolve inside the c4z on this OS: flatten the module
    names (e.g. `np_engine.lua`) before anything else.
 2. **LAN relay up** — properties: **LAN URL** = `http://<controller-ip>:8487/?k=…` (not

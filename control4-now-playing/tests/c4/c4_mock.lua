@@ -23,6 +23,10 @@ A faithful-enough mock of the Control4 DriverWorks Lua API for driving driver.lu
   m:renumber(dev, base)         -- the foreign driver reloaded: same names, new variable ids
   m.gdv_shape = "by_name"       -- GetDeviceVariables returns {[NAME]={value=}} (no ids)
   m.on_get_var = fn(dev, var)   -- called before every GetDeviceVariable (torn-read tests)
+  m:fire_device_event(dev, ev)  -- the device fires event ev (C4:FireEvent on that driver): every
+                                --   driver that called C4:RegisterDeviceEvent(dev, ev) gets
+                                --   OnDeviceEvent(dev, ev) (m.device_events = { ["dev:ev"] = true })
+  m.no_device_events = true     -- an OS without C4:RegisterDeviceEvent (pre-2.9.0)
   m:connect(h) / m:client_send(h, data) / m:client_close(h)   -- LAN server clients
                                 --   (OnServerDataIn / ...StatusChanged get the client address,
                                 --   port and the CreateServer identifier appended, OS 3.3.1+)
@@ -112,7 +116,7 @@ M.FORBIDDEN_IN_INIT = {
   SetVariable = true, SetTimer = true, JsonEncode = true, JsonDecode = true, RoomGetId = true,
   GetDeviceVariable = true, CreateServer = true, FireEvent = true, GetControllerNetworkAddress = true,
   RegisterVariableListener = true, url = true, SendToProxy = true, SendDataToUI = true,
-  GetDeviceVariables = true, GetDevices = true,
+  GetDeviceVariables = true, GetDevices = true, RegisterDeviceEvent = true,
 }
 
 function M.new(opts)
@@ -122,7 +126,7 @@ function M.new(opts)
     room_id = opts.room_id or 100, devices = {},
     added_vars = {}, vars = {}, set_log = {}, events = {}, proxy = {}, data_to_ui = {},
     requests = {}, routes = {}, updated_props = {}, prints = {}, errors = {}, debuglog = {},
-    violations = {}, persist = {}, listeners = {}, server = nil, servers_created = 0,
+    violations = {}, persist = {}, listeners = {}, device_events = {}, server = nil, servers_created = 0,
     sent = {}, closed = {}, files = {}, file_handles = 0, phase = "loaded", echo = opts.echo, misuse = {},
     create_server_fail = {}, controller_ip = "192.168.1.5",
   }, Mock)
@@ -282,6 +286,14 @@ function Mock:proxy_device(id, name, protocol_id, c4i)
 end
 
 function Mock:var_id(dev, name) return self.devices[dev].var_ids[name] end
+
+function Mock:fire_device_event(dev, ev)
+  if self.device_events[tostring(dev) .. ":" .. tostring(ev)] then
+    self:call("OnDeviceEvent", dev, ev)
+    return true
+  end
+  return false
+end
 
 function Mock:set_named(dev, name, value)
   local id = assert(self.devices[dev].var_ids[name], "no variable " .. tostring(name))
@@ -493,6 +505,17 @@ function Mock:_build_c4()
   function C4:UnregisterVariableListener(dev, var)
     m.listeners[dev .. ":" .. var] = nil
   end
+  -- C4:RegisterDeviceEvent(deviceId, eventId) / UnregisterDeviceEvent / UnregisterAllDeviceEvents
+  -- (docs-driverworks-api 7_event, 2.9.0): OnDeviceEvent(firingDeviceId, eventId) on fire
+  function C4:RegisterDeviceEvent(dev, ev)
+    m:_check("RegisterDeviceEvent")
+    if m.no_device_events then error("attempt to call method 'RegisterDeviceEvent' (a nil value)") end
+    m.device_events[tostring(dev) .. ":" .. tostring(ev)] = true
+  end
+  function C4:UnregisterDeviceEvent(dev, ev)
+    m.device_events[tostring(dev) .. ":" .. tostring(ev)] = nil
+  end
+  function C4:UnregisterAllDeviceEvents() m.device_events = {} end
   -- C4:CreateServer(nPort, strDelimiter, bUseUDP, strIdentifier): returns false, err on failure
   -- (it does not throw); the identifier (OS 3.3.1+) comes back on OnServerDataIn / status.
   function C4:CreateServer(port, delimiter, udp, identifier)

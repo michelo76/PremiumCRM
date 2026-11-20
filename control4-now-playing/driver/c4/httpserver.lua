@@ -46,7 +46,7 @@ M.IDENTIFIER = "now_playing_info_lan"
 
 local REASONS = {
   [200] = "OK", [204] = "No Content", [304] = "Not Modified", [400] = "Bad Request", [401] = "Unauthorized",
-  [403] = "Forbidden", [404] = "Not Found", [405] = "Method Not Allowed", [408] = "Request Timeout",
+  [403] = "Forbidden", [404] = "Not Found", [405] = "Method Not Allowed", [408] = "Request Timeout", [410] = "Gone",
   [413] = "Payload Too Large", [500] = "Internal Server Error", [502] = "Bad Gateway",
   [503] = "Service Unavailable",
 }

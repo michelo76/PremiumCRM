@@ -872,3 +872,512 @@ describe("c4.appletv watcher (C4 mock, no driver)", function()
     m:deactivate()
   end)
 end)
+
+---------------------------------------------------------------------------
+-- 1.3.0: event 19, the programming command, duplicates, resets, variants, artwork lifecycle
+---------------------------------------------------------------------------
+
+local EV = AppleTV.EVENT_ID
+
+-- write a snapshot WITHOUT notifying any listener (a lost REVISION notification)
+local function publish_silently(m, dev, t, opts)
+  local saved = m.listeners
+  m.listeners = {}
+  publish(m, dev, t, opts)
+  m.listeners = saved
+end
+
+local function copy(t, extra)
+  local o = {}
+  for k, v in pairs(t) do o[k] = v end
+  for k, v in pairs(extra or {}) do o[k] = v end
+  return o
+end
+
+local function count_sets(m, name)
+  local n = 0
+  for _, e in ipairs(m.set_log) do if e.name == name then n = n + 1 end end
+  return n
+end
+
+local function count_dtu(m, cmd)
+  local n = 0
+  for _, d in ipairs(m.data_to_ui) do if d.cmd == cmd then n = n + 1 end end
+  return n
+end
+
+describe("Apple TV driver source: event 19 (C4:RegisterDeviceEvent / OnDeviceEvent)", function()
+  it("event 19 of the selected main device is registered by id and re-reads the snapshot", function()
+    local m = running(MP, BEAR) -- a proxy selected: the MAIN device's event is registered
+    T.ok(m.device_events[ATV .. ":" .. EV], "registered on the main device")
+    T.no(m.device_events[MP .. ":" .. EV], "not on the proxy")
+    publish_silently(m, ATV, MOVIE) -- REVISION notification lost
+    m:advance(1)
+    T.eq(m.vars.TITLE, "Forks", "nothing without a trigger")
+    T.ok(m:fire_device_event(ATV, EV))
+    m:advance(1)
+    T.eq(m.vars.TITLE, "Top Gun: Maverick")
+    T.contains(status(m), "revision 2")
+    no_errors(m)
+    m:destroy()
+    T.eq(next(m.device_events), nil, "destroy unregisters the event")
+  end)
+
+  it("listener + event 19 + the command for the same revision: one redraw only", function()
+    local m = running(ATV, BEAR)
+    publish(m, ATV, MOVIE) -- the REVISION listener applies revision 2
+    m:advance(1)
+    T.eq(m.vars.TITLE, "Top Gun: Maverick")
+    local app = m.env.NOW_PLAYING_APP
+    local v0, sj0, ui0 = app.engine.state.version, count_sets(m, "STATE_JSON"), count_dtu(m, "NOW_PLAYING")
+    local ver0, ev0 = m.vars.VERSION, #m.events
+    m:fire_device_event(ATV, EV) -- the Apple TV driver's event 19 for the same snapshot
+    m:advance(1)
+    m:call("ExecuteCommand", "Refresh Apple TV Now Playing", {}) -- and the Composer-wired command
+    m:advance(1)
+    T.eq(app.engine.state.version, v0, "state version")
+    T.eq(count_sets(m, "STATE_JSON"), sj0, "STATE_JSON writes")
+    T.eq(count_dtu(m, "NOW_PLAYING"), ui0, "DataToUI pushes")
+    T.eq(m.vars.VERSION, ver0); T.eq(#m.events, ev0, "no events")
+    no_errors(m)
+    m:destroy()
+  end)
+
+  it("events of another device, another event id, or the previous selection are ignored", function()
+    local m = new({ ["Apple TV Driver"] = tostring(ATV) })
+    add_atv(m); add_atv(m, ATV2, "Bedroom Apple TV", { base = 5001 })
+    m:activate(); publish(m, ATV, BEAR); publish(m, ATV2, MOVIE)
+    m:start(); m:advance(1)
+    T.eq(m.vars.TITLE, "Forks")
+    m:prop("Apple TV Driver", tostring(ATV2))
+    m:advance(1)
+    T.eq(m.vars.TITLE, "Top Gun: Maverick")
+    T.ok(m.device_events[ATV2 .. ":" .. EV]); T.no(m.device_events[ATV .. ":" .. EV], "old subscription cancelled")
+    local reads = 0
+    m.on_get_var = function() reads = reads + 1 end
+    publish_silently(m, ATV, copy(BEAR, { TITLE = "Old source" }))
+    m:call("OnDeviceEvent", ATV, EV) -- a late event of the previous selection
+    m:call("OnDeviceEvent", ATV2, 12) -- NOW_PLAYING_CHANGED (title only): not used
+    m:call("OnDeviceEvent", 999, EV)
+    m:advance(1)
+    T.eq(reads, 0, "nothing read"); T.eq(m.vars.TITLE, "Top Gun: Maverick")
+    no_errors(m)
+    m:destroy()
+  end)
+
+  it("an OS without C4:RegisterDeviceEvent: logged once, the listener and the command still work", function()
+    local m = new({ ["Apple TV Driver"] = tostring(ATV), ["Debug Mode"] = "Print" })
+    m.no_device_events = true
+    add_atv(m); m:activate(); publish(m, ATV, BEAR)
+    m:start(); m:advance(1)
+    T.eq(m.vars.TITLE, "Forks"); T.eq(next(m.device_events), nil)
+    T.ok(m:printed("event 19 not subscribed"))
+    publish(m, ATV, MOVIE); m:advance(1)
+    T.eq(m.vars.TITLE, "Top Gun: Maverick", "REVISION listener")
+    publish_silently(m, ATV, BEAR)
+    m:call("ExecuteCommand", "Refresh Apple TV Now Playing", {})
+    m:advance(1)
+    T.eq(m.vars.TITLE, "Forks", "command")
+    no_errors(m)
+    m:destroy()
+  end)
+
+  it("the event subscription follows a reload of the Apple TV driver (re-registered with the listener)", function()
+    local m = running(ATV, BEAR)
+    m.device_events = {} -- the Apple TV driver reloaded: registrations on it are gone
+    m.listeners = {}
+    m:renumber(ATV, 2001)
+    m:advance(AppleTV.POLL_S + 1) -- safety poll: map changed -> listener AND event re-registered
+    T.ok(m.device_events[ATV .. ":" .. EV])
+    publish_silently(m, ATV, MOVIE)
+    m:fire_device_event(ATV, EV); m:advance(1)
+    T.eq(m.vars.TITLE, "Top Gun: Maverick")
+    no_errors(m)
+    m:destroy()
+  end)
+end)
+
+describe("Apple TV driver source: \"Refresh Apple TV Now Playing\" programming command", function()
+  it("forces an immediate re-read of the selected Apple TV (no REVISION change needed)", function()
+    local m = running(ATV, BEAR)
+    local d = m.devices[ATV]
+    d.vars[d.var_ids.NOW_PLAYING_TITLE] = "Silent" -- written without any notification / revision
+    m:call("ExecuteCommand", "Refresh Apple TV Now Playing", {})
+    m:advance(1)
+    T.eq(m.vars.TITLE, "Silent")
+    no_errors(m)
+    m:destroy()
+  end)
+  it("re-resolves an unresolved selection; without an Apple TV selected it is a harmless no-op", function()
+    local m = new({ ["Apple TV Driver"] = tostring(ATV) })
+    m:start(); m:advance(1)
+    T.contains(status(m), "not found")
+    add_atv(m); publish(m, ATV, BEAR)
+    m:call("ExecuteCommand", "Refresh Apple TV Now Playing", {})
+    m:advance(1)
+    T.eq(m.vars.TITLE, "Forks"); T.contains(status(m), "Connected")
+    m:destroy()
+    m = new()
+    m:start(); m:advance(1)
+    local v = m.vars.VERSION
+    m:call("ExecuteCommand", "Refresh Apple TV Now Playing", {})
+    m:advance(1)
+    T.eq(m.vars.VERSION, v); no_errors(m)
+    m:destroy()
+  end)
+end)
+
+describe("Apple TV driver source: same-title changes, clearing, restarts", function()
+  it("same title: new artwork, cleared artwork and a play-state change are each applied", function()
+    local m = running(ATV, BEAR)
+    local app = m.env.NOW_PLAYING_APP
+    local v = app.engine.state.version
+    publish(m, ATV, copy(BEAR, { ARTWORK_URL = "https://img.example.com/bear-s2e7-v2.jpg" }))
+    m:advance(1)
+    T.eq(m.vars.ARTWORK_URL, "https://img.example.com/bear-s2e7-v2.jpg")
+    T.ok(app.engine.state.version > v, "version bump"); v = app.engine.state.version
+    publish(m, ATV, copy(BEAR, { ARTWORK_URL = "" })) -- same title, artwork gone
+    m:advance(1)
+    T.eq(m.vars.TITLE, "Forks"); T.eq(m.vars.ARTWORK_URL, ""); T.eq(m.vars.POSTER_URL, "")
+    T.is_nil(state_of(m).media.artwork_url, "old image not retained")
+    T.ok(app.engine.state.version > v, "version bump"); v = app.engine.state.version
+    local n = #m.events
+    publish(m, ATV, copy(BEAR, { ARTWORK_URL = "", PLAY_STATE = "Paused" }))
+    m:advance(1)
+    T.eq(m.vars.PLAY_STATE, "paused"); T.ok(app.engine.state.version > v)
+    T.deep_eq(m:events_since(n), { "Playback Paused" })
+    no_errors(m)
+    m:destroy()
+  end)
+
+  it("disconnect (VALID=0, event 19 only) clears metadata, artwork, progress and play state", function()
+    local m = running(ATV, BEAR)
+    publish_silently(m, ATV, { VALID = "0", PLAY_STATE = "", UPDATED_AT = "0" })
+    m:fire_device_event(ATV, EV); m:advance(1)
+    T.eq(m.vars.PLAY_STATE, "idle"); T.eq(m.vars.TITLE, ""); T.eq(m.vars.ARTWORK_URL, "")
+    T.eq(m.vars.POSITION_SECONDS, "0"); T.eq(m.vars.DURATION_SECONDS, "0"); T.eq(m.vars.PROGRESS_PERCENT, "0")
+    T.eq(m.vars.IS_PLAYING, "0")
+    local st = state_of(m)
+    T.is_nil(st.media.title); T.is_nil(st.media.artwork_url); T.is_nil(st.playback.position_s)
+    T.is_nil(st.source.app_name)
+    T.contains(status(m), "nothing playing (VALID=0)")
+    -- VALID 0 -> 1 (reconnected): read and shown again
+    publish(m, ATV, MOVIE); m:advance(1)
+    T.eq(m.vars.TITLE, "Top Gun: Maverick")
+    no_errors(m)
+    m:destroy()
+  end)
+
+  it("same REVISION number re-used with different content (reset) -> confirmed by a second read, applied", function()
+    local m = running(ATV, BEAR) -- revision 1 applied
+    -- the Apple TV driver reloaded with the same variable ids, its counter restarted and its first
+    -- snapshot is again revision 1; the listener notification was lost
+    publish_silently(m, ATV, MOVIE, { rev = 1 })
+    m:advance(AppleTV.POLL_S - 0.8) -- safety poll (armed at start): same revision, other content -> suspect
+    T.eq(m.vars.TITLE, "Forks", "not applied on a single read (could be a write in progress)")
+    m:advance(AppleTV.RETRY_S + 0.5) -- confirmation read: same revision, same content -> restart
+    T.eq(m.vars.TITLE, "Top Gun: Maverick")
+    T.eq(m.env.NOW_PLAYING_APP.atv.restarts, 1)
+    no_errors(m)
+    m:destroy()
+  end)
+
+  it("same REVISION and same content (duplicate trigger) -> nothing re-applied, no confirm timer", function()
+    local m = running(ATV, BEAR)
+    local t0 = m:pending_timers()
+    m:fire_device_event(ATV, EV)
+    T.eq(m:pending_timers(), t0)
+    T.is_nil(m.env.NOW_PLAYING_APP.atv.suspect)
+    m:destroy()
+  end)
+
+  it("our driver restarting reads the current snapshot immediately (no notification needed)", function()
+    local m = running(ATV, BEAR)
+    publish(m, ATV, MOVIE); m:advance(1)
+    m:destroy()
+    m.listeners, m.device_events = {}, {}
+    m.data_to_ui, m.vars = {}, {}
+    m:start()
+    m:advance(0.1)
+    T.eq(m.vars.TITLE, "Top Gun: Maverick"); T.contains(status(m), "revision 2")
+    T.ok(m.device_events[ATV .. ":" .. EV]); T.eq(listeners(m), 1)
+    no_errors(m)
+    m:destroy()
+  end)
+
+  it("the selection is cleared -> display data cleared promptly (off, no artwork), subscriptions gone", function()
+    local m = running(ATV, BEAR)
+    m:prop("Apple TV Driver", "")
+    m:advance(1)
+    T.eq(m.vars.TITLE, ""); T.eq(m.vars.ARTWORK_URL, ""); T.eq(m.vars.PLAY_STATE, "off")
+    T.eq(listeners(m), 0); T.eq(next(m.device_events), nil)
+    no_errors(m)
+    m:destroy()
+  end)
+end)
+
+describe("Apple TV driver source: defensive numbers", function()
+  local BAD = { "abc", "", "  ", "-5", "nan", "NaN", "inf", "-inf", "1e400", "0x10", "1.2.3", ".", "1e-3", "+5", "12abc" }
+  it("decimal(): plain non-negative decimals only", function()
+    T.eq(AppleTV.decimal(" 12 "), 12); T.eq(AppleTV.decimal("12.5"), 12.5); T.eq(AppleTV.decimal("1e3"), 1000)
+    T.eq(AppleTV.decimal("0"), 0); T.eq(AppleTV.decimal(".5"), 0.5)
+    for _, v in ipairs(BAD) do T.is_nil(AppleTV.decimal(v), "decimal(" .. v .. ")") end
+    T.is_nil(AppleTV.decimal("99999999999999999999", 1e6), "above the bound")
+  end)
+  for _, field in ipairs({ "POSITION", "DURATION", "UPDATED_AT", "SEASON", "EPISODE" }) do
+    it(field .. ": junk / negative / hex / nan / inf / huge -> unknown, never an error", function()
+      for _, v in ipairs(BAD) do
+        local pb = P({ VALID = "1", PLAY_STATE = "Playing", TITLE = "T", SERIES = "S", [field] = v })
+        local x = ({ POSITION = pb.playback.position_s, DURATION = pb.playback.duration_s,
+          UPDATED_AT = pb.playback.position_updated_at, SEASON = pb.media.season, EPISODE = pb.media.episode })[field]
+        T.is_nil(x, field .. "=" .. v)
+      end
+      local pb = P({ VALID = "1", PLAY_STATE = "Playing", TITLE = "T", SERIES = "S", [field] = "99999999999999999999" })
+      local x = ({ POSITION = pb.playback.position_s, DURATION = pb.playback.duration_s,
+        UPDATED_AT = pb.playback.position_updated_at, SEASON = pb.media.season, EPISODE = pb.media.episode })[field]
+      T.is_nil(x, field .. " huge")
+    end)
+  end
+  it("sensible values still parse: \" 12 \", \"12.5\", \"1e3\"", function()
+    local pb = P({ VALID = "1", PLAY_STATE = "Playing", TITLE = "T", POSITION = " 12 ", DURATION = "1e3",
+      UPDATED_AT = tostring(NOW) .. ".0" })
+    T.eq(pb.playback.position_s, 12); T.eq(pb.playback.duration_s, 1000); T.eq(pb.playback.position_updated_at, NOW)
+    T.eq(P({ VALID = "1", PLAY_STATE = "Playing", TITLE = "T", POSITION = "12.5", DURATION = "100" }).playback.position_s, 12.5)
+  end)
+  it("through the driver: junk numbers give valid JSON and no negative / NaN / inf anywhere", function()
+    local weird = { { "abc", "nan" }, { "-5", "inf" }, { "0x10", "1e400" }, { "99999999999999999999", "-0" }, { "", "12abc" } }
+    local m = running(ATV, BEAR)
+    for i, w in ipairs(weird) do
+      publish(m, ATV, copy(BEAR, { POSITION = w[1], DURATION = w[2], SEASON = w[2], EPISODE = w[1], UPDATED_AT = w[1] }))
+      m:advance(1)
+      local ok, st = pcall(json.decode, m.vars.STATE_JSON)
+      T.ok(ok and type(st) == "table", "STATE_JSON is JSON (" .. i .. ")")
+      T.no(m.vars.STATE_JSON:find("nan", 1, true) or m.vars.STATE_JSON:find("inf", 1, true), "no nan/inf text")
+      for _, k in ipairs({ "position_s", "duration_s", "position_updated_at" }) do
+        local x = st.playback[k]
+        T.ok(x == nil or (x == x and x >= 0 and x < math.huge), k .. " = " .. tostring(x))
+      end
+      for _, k in ipairs({ "POSITION_SECONDS", "DURATION_SECONDS", "PROGRESS_PERCENT", "SEASON", "EPISODE" }) do
+        local n = tonumber(m.vars[k])
+        T.ok(n and n == n and n >= 0 and n < 1e9, k .. " = " .. tostring(m.vars[k]))
+      end
+      T.eq(m.vars.TITLE, "Forks")
+    end
+    -- REVISION junk: not published, reported, no error
+    m:set_named(ATV, "NOW_PLAYING_REVISION", "-5")
+    m:advance(1)
+    T.contains(status(m), "NOW_PLAYING_REVISION is not a number")
+    m:set_named(ATV, "NOW_PLAYING_REVISION", "abc")
+    m:advance(1)
+    publish(m, ATV, MOVIE, { rev = 50 })
+    m:advance(1)
+    T.eq(m.vars.TITLE, "Top Gun: Maverick", "recovers with the next valid revision")
+    no_errors(m)
+    m:destroy()
+  end)
+end)
+
+describe("Apple TV driver source: licensed and unrestricted variants", function()
+  local UNRESTRICTED_C4Z = "smartbuildos_appletv_native_unrestricted.c4z" -- hypothetical other file name
+
+  -- each variant: same NOW_PLAYING_* contract; names / models are deliberately unlike each other
+  local VARIANTS = {
+    { label = "licensed", id = ATV, name = "Den Apple TV", model = "Apple TV Native", c4i = C4Z },
+    { label = "unrestricted (same c4z)", id = ATV2, name = "SmartBuildOS ATV (Unrestricted)",
+      model = "Apple TV Native Unrestricted", c4i = C4Z },
+  }
+  for _, v in ipairs(VARIANTS) do
+    it(v.label .. ": identified by NOW_PLAYING_REVISION, read and reported in status", function()
+      local m = new({ ["Apple TV Driver"] = tostring(v.id) })
+      local d = m:dyn_device(v.id, v.name, cleared(), { c4i = v.c4i, base = v.id * 10 })
+      d.model = v.model
+      m:proxy_device(v.id + 1, v.name, v.id, "media_player.c4i")
+      m:activate(); publish(m, v.id, BEAR)
+      m:start(); m:advance(1)
+      T.eq(m.vars.TITLE, "Forks"); T.eq(m.vars.SOURCE_DEVICE, v.name)
+      T.contains(status(m), "Connected to " .. v.name .. " (device " .. v.id .. "), revision 1")
+      m.prints = {}
+      m:action("TestMetadataSources"); m:advance(1)
+      T.contains(m:all_prints(), "OK - device " .. v.id .. " (" .. v.name .. ")")
+      m:destroy()
+      -- also when a child proxy is what the selector stored
+      m = new({ ["Apple TV Driver"] = tostring(v.id + 1) })
+      m:dyn_device(v.id, v.name, cleared(), { c4i = v.c4i, base = v.id * 10 })
+      m:proxy_device(v.id + 1, v.name, v.id, "media_player.c4i")
+      m:activate(); publish(m, v.id, MOVIE)
+      m:start(); m:advance(1)
+      T.eq(m.vars.TITLE, "Top Gun: Maverick"); T.contains(status(m), "(device " .. v.id .. ")")
+      no_errors(m)
+      m:destroy()
+    end)
+  end
+
+  it("both variants in one project: each selection reads its own device", function()
+    local m = new({ ["Apple TV Driver"] = tostring(ATV2) })
+    add_atv(m, ATV, "Den Apple TV"); add_atv(m, ATV2, "SmartBuildOS ATV (Unrestricted)", { base = 5001 })
+    m:activate(); publish(m, ATV, BEAR); publish(m, ATV2, MOVIE)
+    m:start(); m:advance(1)
+    T.eq(m.vars.TITLE, "Top Gun: Maverick"); T.contains(status(m), "SmartBuildOS ATV (Unrestricted)")
+    m:destroy()
+  end)
+
+  it("a variant with another c4z file name works through the Device ID override (any file name)", function()
+    local m = new({ ["Apple TV Driver Device ID"] = "500" })
+    m:dyn_device(500, "Apple TV (variant)", cleared(), { c4i = UNRESTRICTED_C4Z })
+    m:activate(); publish(m, 500, BEAR)
+    m:start(); m:advance(1)
+    T.eq(m.vars.TITLE, "Forks"); T.contains(status(m), "Connected to Apple TV (variant) (device 500)")
+    T.ok(m.device_events["500:" .. EV])
+    no_errors(m)
+    m:destroy()
+  end)
+
+  it("finding such a variant from its proxy is a one-line change (AppleTV.C4Z_NAMES)", function()
+    local function run()
+      local m = new({ ["Apple TV Driver"] = "501" })
+      m:dyn_device(500, "Apple TV (variant)", cleared(), { c4i = UNRESTRICTED_C4Z })
+      m:proxy_device(501, "Apple TV (variant)", 500, "media_player.c4i")
+      m.C4.GetDevices = nil -- only the file-name based discovery can find the main device
+      m:activate(); publish(m, 500, BEAR)
+      m:start(); m:advance(1)
+      local title = m.vars.TITLE
+      m:destroy()
+      return title
+    end
+    T.eq(run(), "", "unknown file name: not discovered from the proxy")
+    table.insert(AppleTV.C4Z_NAMES, UNRESTRICTED_C4Z)
+    local ok, title = pcall(run)
+    table.remove(AppleTV.C4Z_NAMES)
+    T.ok(ok, tostring(title)); T.eq(title, "Forks")
+  end)
+
+  it("driver.xml's Apple TV Driver selector lists exactly AppleTV.C4Z_NAMES; nothing keys off names", function()
+    local xml = Mock.parse_driver_xml(DRIVER .. "/driver.xml")
+    T.deep_eq(xml.properties["Apple TV Driver"].items, AppleTV.C4Z_NAMES)
+    local src = assert(io.open(DRIVER .. "/c4/appletv.lua")):read("*a")
+    T.no(src:find("GetDeviceDisplayName[^\n]*==", 1) or src:find(":find%(\"[Uu]nrestricted") or
+      src:find("[Ll]icensed\"", 1), "no identification by display name / variant name")
+  end)
+end)
+
+describe("Apple TV driver source: source switching and late artwork responses", function()
+  local BEAR_ART = BEAR.ARTWORK_URL
+  local function got_data_for(m, n0, url)
+    for i = n0 + 1, #m.data_to_ui do
+      local d = m.data_to_ui[i]
+      if d.cmd == "NOW_PLAYING_ARTWORK" and d.params.url == url and d.params.data then return true end
+    end
+    return false
+  end
+
+  it("GET_ARTWORK in flight, then the selection switches to another Apple TV -> the late image is never delivered", function()
+    local m = new({ ["Apple TV Driver"] = tostring(ATV) })
+    add_atv(m); add_atv(m, ATV2, "Bedroom Apple TV", { base = 5001 })
+    m:route(BEAR_ART, { status = 200, body = "\137PNG\r\n\26\nxxxx", headers = { ["Content-Type"] = "image/png" }, delay = 5 })
+    m:activate(); publish(m, ATV, BEAR); publish(m, ATV2, MOVIE)
+    m:start(); m:advance(1)
+    local n0 = #m.data_to_ui
+    m:call("ExecuteCommand", "GET_ARTWORK", json.encode({ url = BEAR_ART }))
+    m:prop("Apple TV Driver", tostring(ATV2)) -- the dealer re-points the driver meanwhile
+    m:advance(1)
+    T.eq(m.vars.TITLE, "Top Gun: Maverick")
+    m:advance(6) -- the old download completes now
+    T.no(got_data_for(m, n0, BEAR_ART), "late artwork of the previous source delivered")
+    local art = m.env.NOW_PLAYING_APP.artwork
+    T.eq(art:count(), 0, "a cancelled download populates nothing")
+    T.ok((art.stats.late or 0) >= 1, "late response seen and ignored")
+    -- the page is answered (error), so it does not wait for it
+    local answered = false
+    for i = n0 + 1, #m.data_to_ui do
+      local d = m.data_to_ui[i]
+      if d.cmd == "NOW_PLAYING_ARTWORK" and d.params.url == BEAR_ART then answered = d.params.error ~= nil end
+    end
+    T.ok(answered, "answered with an error")
+    -- and the URL is refused while it is not part of the state
+    m:call("ExecuteCommand", "GET_ARTWORK", json.encode({ url = BEAR_ART }))
+    T.eq(m.data_to_ui[#m.data_to_ui].params.error, "not in current state")
+    no_errors(m)
+    m:destroy()
+  end)
+
+  it("same source, ARTWORK_URL cleared while downloading -> late image not delivered; relay answers 410", function()
+    local m = running(ATV, BEAR)
+    m:route(BEAR_ART, { status = 200, body = "\137PNG\r\n\26\nxxxx", headers = { ["Content-Type"] = "image/png" }, delay = 5 })
+    local n0 = #m.data_to_ui
+    m:call("ExecuteCommand", "GET_ARTWORK", json.encode({ url = BEAR_ART }))
+    local tok = m.env.NOW_PLAYING_APP.token
+    m:connect(77)
+    m:client_send(77, "GET /api/artwork?url=" .. BEAR_ART:gsub(":", "%%3A"):gsub("/", "%%2F") .. "&k=" .. tok ..
+      " HTTP/1.1\r\nHost: x\r\n\r\n")
+    publish(m, ATV, copy(BEAR, { ARTWORK_URL = "" }))
+    m:advance(7)
+    T.no(got_data_for(m, n0, BEAR_ART))
+    T.contains(m:response(77), "HTTP/1.1 410")
+    T.is_nil(state_of(m).media.artwork_url)
+    no_errors(m)
+    m:destroy()
+  end)
+
+  it("a download that completes while its URL is still current is delivered (and cached) as before", function()
+    local m = running(ATV, BEAR)
+    m:route(BEAR_ART, { status = 200, body = "\137PNG\r\n\26\nxxxx", headers = { ["Content-Type"] = "image/png" }, delay = 1 })
+    local n0 = #m.data_to_ui
+    m:call("ExecuteCommand", "GET_ARTWORK", json.encode({ url = BEAR_ART }))
+    publish(m, ATV, copy(BEAR, { POSITION = "900" })) -- same artwork, new snapshot
+    m:advance(2)
+    T.ok(got_data_for(m, n0, BEAR_ART))
+    T.eq(m.env.NOW_PLAYING_APP.artwork:count(), 1)
+    m:destroy()
+  end)
+
+  it("the selected Apple TV driver disappears -> off, artwork gone, subscriptions dropped", function()
+    local m = running(ATV, BEAR)
+    m.devices[ATV] = nil; m.devices[MP] = nil; m.devices[APPS] = nil; m.devices[SWITCHER] = nil
+    m:advance(AppleTV.POLL_S + 1)
+    T.eq(m.vars.PLAY_STATE, "off"); T.eq(m.vars.ARTWORK_URL, ""); T.is_nil(state_of(m).media.artwork_url)
+    T.eq(next(m.device_events), nil)
+    no_errors(m)
+    m:destroy()
+  end)
+end)
+
+describe("other sources with the Apple TV source unconfigured", function()
+  local ROKU_HA_ROOM = {
+    ["Roku Address"] = "192.168.1.50", ["Roku Name"] = "Living Room Roku",
+    ["Home Assistant URL"] = "http://192.168.1.2:8123", ["Home Assistant Token"] = "ha-long-lived-token-xyz",
+    ["Home Assistant Entity ID"] = "media_player.living_room_roku", ["Home Assistant Entity Is"] = "Same Device As Roku",
+    ["Use Control4 Room Media"] = "On", ["Apple TV Bridge URL"] = "http://192.168.1.10:8765", ["Apple TV Device"] = "Den",
+  }
+  local function run(poke)
+    local m = Mock.new({ root = DRIVER, room_id = ROOM })
+    for k, v in pairs(ROKU_HA_ROOM) do m.Properties[k] = v end
+    m.Properties["Music Lookup"] = "Off"
+    m.devices[ROOM].vars = { [1010] = "1" }
+    m:route("/query/device-info", { status = 200, body = T.fixture("roku_device_info.xml") })
+    m:route("/query/active-app", { status = 200, body = T.fixture("roku_active_app_netflix.xml") })
+    m:route("/query/media-player", { status = 200, body = T.fixture("roku_media_player_play.xml") })
+    m:route("/api/states/", { status = 200, body = T.fixture("ha_movie_title.json") })
+    m:route("/now-playing", { status = 200, body = T.fixture("bridge_appletv.json") })
+    m:start(); m:advance(3)
+    if poke then
+      m:call("OnDeviceEvent", ATV, EV)
+      m:call("ExecuteCommand", "Refresh Apple TV Now Playing", {})
+      m:advance(0.5)
+    end
+    m:advance(3)
+    local st = state_of(m)
+    st.sent_at, st.updated_at = nil, nil
+    local out = { state = json.encode(st), title = m.vars.TITLE, provider = m.vars.SOURCE_PROVIDER,
+      sources = m.updated_props["Metadata Sources"], atv = m.updated_props["Apple TV Driver Status"],
+      events = next(m.device_events), errors = #m.errors }
+    m:destroy()
+    return out
+  end
+  it("Roku / HA / bridge / room: same state with or without event 19 / the Apple TV command poking at it", function()
+    local a, b = run(false), run(true)
+    T.ok(a.title ~= "", "something plays"); T.eq(a.errors, 0); T.eq(b.errors, 0)
+    T.eq(a.atv, "Not configured"); T.is_nil(a.events, "no device-event subscriptions")
+    T.eq(b.title, a.title); T.eq(b.provider, a.provider); T.eq(b.sources, a.sources)
+    T.eq(b.state, a.state)
+  end)
+end)

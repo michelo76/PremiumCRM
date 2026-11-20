@@ -77,3 +77,43 @@ describe("np.flatten", function()
     T.eq(v.PROGRESS_PERCENT.value, 0); T.eq(v.POSITION_SECONDS.value, 110); T.eq(v.IS_LIVE.value, true)
   end)
 end)
+
+describe("np.flatten position extrapolation rule", function()
+  local T0 = 1790000000
+  local function st(state, pos, dur, at, live)
+    return { playback = { state = state, position_s = pos, duration_s = dur, position_updated_at = at, is_live = live },
+      media = {}, source = {} }
+  end
+  it("advances only while playing (paused / buffering / stopped / idle stay at the observation)", function()
+    T.eq((flatten.position(st("playing", 100, 600, T0), T0 + 20)), 120)
+    for _, s in ipairs({ "paused", "buffering", "stopped", "idle", "off" }) do
+      T.eq((flatten.position(st(s, 100, 600, T0), T0 + 20)), 100, s)
+    end
+    T.eq((flatten.position(st("playing", 100, 600, nil), T0 + 20)), 100, "no observation time: no estimate")
+  end)
+  it("held at the duration (stale) when the estimate would pass it", function()
+    local p, stale = flatten.position(st("playing", 590, 600, T0), T0 + 60)
+    T.eq(p, 600); T.eq(stale, true)
+    p, stale = flatten.position(st("playing", 100, 600, T0), T0 + 20)
+    T.eq(stale, false)
+  end)
+  it("unknown duration: at most MAX_EXTRAPOLATE_S (4 h) past the observation, then frozen (stale)", function()
+    T.eq(flatten.MAX_EXTRAPOLATE_S, 4 * 3600)
+    local p, stale = flatten.position(st("playing", 100, nil, T0), T0 + 5 * 3600)
+    T.eq(p, 100 + 4 * 3600); T.eq(stale, true)
+    p, stale = flatten.position(st("playing", 100, nil, T0), T0 + 3600)
+    T.eq(p, 3700); T.eq(stale, false)
+    -- also with a (very long) known duration
+    p, stale = flatten.position(st("playing", 0, 10 * 3600, T0), T0 + 6 * 3600)
+    T.eq(p, 4 * 3600); T.eq(stale, true)
+  end)
+  it("POSITION_SECONDS / PROGRESS_PERCENT follow the rule", function()
+    local v = vars(st("playing", 100, nil, T0), T0 + 10 * 3600)
+    T.eq(v.POSITION_SECONDS.value, 100 + 4 * 3600)
+    v = vars(st("playing", 590, 600, T0), T0 + 3600)
+    T.eq(v.POSITION_SECONDS.value, 600); T.eq(v.PROGRESS_PERCENT.value, 100)
+    v = vars(st("paused", 300, 600, T0), T0 + 3600)
+    T.eq(v.POSITION_SECONDS.value, 300); T.eq(v.PROGRESS_PERCENT.value, 50)
+  end)
+end)
+

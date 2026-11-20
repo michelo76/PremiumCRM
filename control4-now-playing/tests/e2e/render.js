@@ -378,6 +378,101 @@ async function runSequence(browser, base, sc, transport) {
   await ctx.close();
 }
 
+// ---------------------------------------------------------------- Apple TV driver source over time
+// atv_seq.json: the real driver's states for playing (artwork) -> same title, ARTWORK_URL cleared +
+// Paused -> VALID=0. The old picture must go (generated placeholder), progress must stop advancing
+// while paused, VALID=0 must show the idle screen. Then the progress estimate bounds: past the
+// duration it is held (stale, no "Ends"), with an unknown duration it stops 4 h after the observation.
+async function runAtvLifecycle(browser, base) {
+  const file = path.join(STATES, 'atv_seq.json');
+  if (!fs.existsSync(file)) { failures.push('atv_seq.json missing'); return; }
+  const steps = JSON.parse(fs.readFileSync(file, 'utf8')).steps;
+  const s0 = JSON.parse(steps[0]);
+  const tag = 'atv_lifecycle/c4-dtu';
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+  await page.route(/^https?:\/\/(?!127\.0\.0\.1)/, (route) => {
+    route.fulfill({ status: 200, contentType: 'image/svg+xml', headers: { 'Access-Control-Allow-Origin': '*' }, body: imageFor(route.request().url()) });
+  });
+  await page.addInitScript((first) => {
+    const send = (fn, x) => setTimeout(() => window[fn](x), 20);
+    window.__push = (json) => send('onDataToUi', { NOW_PLAYING: { state: json } });
+    window.C4 = {
+      subscribeToDataToUi: () => {}, subscribeToVariable: () => {},
+      sendCommand: (name, params) => {
+        if (name === 'GET_STATE') send('onDataToUi', { NOW_PLAYING: { state: first } });
+        if (name === 'GET_ARTWORK') send('onDataToUi', { NOW_PLAYING_ARTWORK: { url: JSON.parse(params).url, error: 'not in current state' } });
+      },
+    };
+  }, steps[0]);
+  await page.clock.install({ time: new Date((s0.sent_at + SKEW_S) * 1000) }); // device clock 2 min off
+  await page.goto(base + '/index.html?x=1');
+  const look = () => page.evaluate(() => {
+    const on = document.querySelector('#art-stack .art-layer.is-on');
+    const img = on && on.querySelector('img');
+    const p = document.getElementById('progress');
+    return {
+      img: img ? img.getAttribute('src') : null, gen: !!(on && on.querySelector('.gen')),
+      idle: document.body.classList.contains('mode-idle'), np: document.body.classList.contains('mode-np'),
+      left: document.getElementById('progress-left').textContent, right: document.getElementById('progress-right').textContent,
+      hidden: p.classList.contains('is-hidden'), paused: p.classList.contains('is-paused'), stale: p.classList.contains('is-stale'),
+      idleTitle: document.getElementById('idle-title').textContent,
+      bgImgs: Array.prototype.map.call(document.querySelectorAll('#bg .bg-layer.is-on img'), (i) => i.getAttribute('src')),
+    };
+  });
+  const waitFor = async (want, ms) => {
+    const end = Date.now() + ms; let v;
+    while (Date.now() < end) { v = await look(); if (want(v)) return v; await page.waitForTimeout(100); }
+    return v;
+  };
+  // 1. playing, artwork reported by the Apple TV driver
+  let v = await waitFor((x) => x.img === s0.media.artwork_url, 6000);
+  check(v.img === s0.media.artwork_url, `${tag}: artwork shown (${v.img})`);
+  check(!v.stale && !v.hidden && !v.paused, `${tag}: live progress ${JSON.stringify(v)}`);
+  // 2. same title, ARTWORK_URL cleared, Paused: the old picture must not stay
+  await page.evaluate((j) => window.__push(j), steps[1]);
+  v = await waitFor((x) => x.img === null && x.gen, 4000);
+  check(v.img === null && v.gen, `${tag}: cleared artwork -> generated placeholder, got ${JSON.stringify(v)}`);
+  await page.waitForTimeout(1600);
+  v = await look();
+  check(v.img === null && v.bgImgs.indexOf(s0.media.artwork_url) < 0, `${tag}: old image gone from artwork and backdrop`);
+  check(v.paused && !v.stale, `${tag}: paused progress`);
+  const left1 = v.left;
+  await page.waitForTimeout(2200);
+  v = await look();
+  check(v.left === left1 && /^13:20/.test(v.left), `${tag}: paused progress does not advance (${left1} -> ${v.left})`);
+  // 3. VALID=0: idle screen (metadata, artwork, progress and playback state cleared)
+  await page.evaluate((j) => window.__push(j), steps[2]);
+  v = await waitFor((x) => x.idle, 4000);
+  check(v.idle && !v.np && /^Nothing playing/.test(v.idleTitle), `${tag}: VALID=0 -> idle screen, got ${JSON.stringify(v)}`);
+  // 4. progress estimate bounds (same page, Playing again with an old observation)
+  const stale = JSON.parse(steps[0]);
+  stale.version += 10; stale.playback.position_updated_at = stale.sent_at - 3600; // 754 s + 1 h > 2280 s
+  await page.evaluate((j) => window.__push(j), JSON.stringify(stale));
+  v = await waitFor((x) => x.np && x.stale, 4000);
+  check(v.stale && v.left === '38:00' && v.right === '−0:00' && v.right.indexOf('Ends') < 0,
+    `${tag}: past the duration -> held at the duration, stale, no "Ends" (${JSON.stringify(v)})`);
+  const open = JSON.parse(steps[0]);
+  open.version += 20; open.playback.duration_s = null; open.playback.position_updated_at = open.sent_at - 5 * 3600;
+  await page.evaluate((j) => window.__push(j), JSON.stringify(open));
+  v = await waitFor((x) => x.np && x.stale && x.left !== '38:00', 4000);
+  const want = '4:12:34'; // 754 s + 4 h, frozen
+  check(v.stale && v.left === want, `${tag}: unknown duration -> stops 4 h after the observation (${v.left}, want ${want})`);
+  await page.waitForTimeout(2200);
+  check((await look()).left === want, `${tag}: frozen estimate does not advance`);
+  const fresh = JSON.parse(steps[0]);
+  fresh.version += 30; fresh.playback.duration_s = null; fresh.playback.position_updated_at = fresh.sent_at;
+  await page.evaluate((j) => window.__push(j), JSON.stringify(fresh));
+  v = await waitFor((x) => !x.stale, 4000);
+  check(!v.stale, `${tag}: a fresh observation is live again`);
+  await page.screenshot({ path: path.join(SHOTS, 'atv_lifecycle-stale.png') });
+  errors.forEach((e) => failures.push(tag + ': ' + e));
+  await ctx.close();
+}
+
 (async () => {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = 'http://127.0.0.1:' + server.address().port;
@@ -393,6 +488,7 @@ async function runSequence(browser, base, sc, transport) {
     if (['episode', 'music'].indexOf(sc.name) >= 0) { await run(browser, base, sc, 'http', DESK, `${sc.name}-kiosk-1280x800.png`, '&kiosk=1'); runs++; }
     if (sc.pre) for (const transport of ['http', 'c4-dtu']) { await runSequence(browser, base, sc, transport); runs++; }
   }
+  await runAtvLifecycle(browser, base); runs++;
   await browser.close();
   server.close();
   if (failures.length) {
