@@ -21,7 +21,7 @@
 <body>
 
 <h1>Now Playing Info</h1>
-<p class="muted">Control4 DriverWorks driver &middot; version 1.0 &middot; OS 3.1.3 or later</p>
+<p class="muted">Control4 DriverWorks driver &middot; version 1.1 &middot; OS 3.1.3 or later</p>
 
 <p>Now Playing Info figures out <b>what is playing in a room</b> and shows a rich
 &ldquo;about what&rsquo;s playing&rdquo; page (poster, title, episode, synopsis, cast, ratings, progress)
@@ -42,6 +42,7 @@ The driver is purely informational: it never controls playback.</p>
   <li>Optional but recommended: enter a free <b>TMDB API Key</b> (posters, synopsis, cast) and an <b>OMDb API Key</b> (IMDb / Rotten Tomatoes / Metacritic ratings).</li>
   <li>Make the button visible in Navigator (see <a href="#button">Showing the button</a>) and refresh Navigators.</li>
   <li>Run the action <b>Test Metadata Sources</b> and check the <b>Status</b> property.</li>
+  <li>Make sure touch screens (and phones on the home Wi-Fi) can reach the controller on TCP port <b>8487</b> (<b>LAN Web Port</b>); see <a href="#relay">LAN relay</a>.</li>
 </ol>
 
 <h2 id="sources">Sources (where &ldquo;what is playing&rdquo; comes from)</h2>
@@ -102,15 +103,31 @@ The driver is purely informational: it never controls playback.</p>
   <li>Under <b>Watch</b> and/or <b>Listen</b>, find <b>Now Playing</b> (this driver&rsquo;s button) and make it <b>visible</b>; move it to the position you like.</li>
   <li><b>Refresh Navigators</b> (File &rsaquo; Refresh Navigators, or from the Navigators view).</li>
 </ol>
-<p>Tapping the button opens the Now Playing page. The icon changes to a highlighted &ldquo;playing&rdquo; variant while something is playing.
+<p>Tapping the button opens the Now Playing page. While something plays, the icon changes to a highlighted &ldquo;playing&rdquo; variant and the
+button&rsquo;s text shows what is playing, e.g. &ldquo;The Bear &mdash; S2&middot;E7 Forks&rdquo;, &ldquo;Dreams &mdash; Fleetwood Mac&rdquo; or just the app
+(&ldquo;Netflix&rdquo;) when the title is unknown; &ldquo;Paused: &hellip;&rdquo; while paused (at most 60 characters). With nothing playing it reads &ldquo;Now Playing&rdquo;.
 The page works on touch screens and in the Control4 app, including remotely: it receives its data through the Navigator. Artwork that lives on your LAN
 (Roku app icons, Apple TV bridge, Home Assistant, NAS) cannot be reached by a phone away from home, so the page asks the controller for it and the controller
 sends that one image back (<b>Embed LAN Artwork = On</b>). Only images of what is currently playing are fetched this way.</p>
 
+<h3 id="relay">LAN relay (on by default)</h3>
+<p>On some touch screens the Navigator delivers no data to the page. The driver therefore also listens on the controller&rsquo;s <b>LAN Web Port</b>
+(default <b>8487</b>) and puts that address into the button&rsquo;s URL (<code>?relay=http://&lt;controller-ip&gt;:8487&amp;k=&lt;token&gt;</code>,
+see the read-only <b>Web View URL</b> property). When the page gets nothing from the Navigator within about 5 seconds, it fetches the information
+(and LAN artwork) directly from the controller on that port; as soon as the Navigator delivers, it switches back.</p>
+<ul>
+  <li><b>Firewall:</b> touch screens and phones on the home network must be able to reach the controller on <b>TCP 8487</b> (or the port you set).
+      Check VLANs / client isolation between the touch screens and the controller.</li>
+  <li><b>Token:</b> the data endpoints need a random token that the driver creates once and keeps across reboots and driver updates. It is part of
+      the Web View URL / LAN URL and is never written to the log. The page itself (<code>/</code>) carries no secrets and needs no token.</li>
+  <li>Phones away from home cannot reach the relay; they keep using the Navigator (the page retries the relay at most every 30 s).</li>
+  <li><b>LAN Web Port = 0</b> turns the relay off. If the port is taken, <b>LAN URL</b> and <b>Status</b> show the error and the driver keeps retrying.</li>
+</ul>
+
 <h2 id="props">Properties</h2>
 <table>
   <tr><th>Property</th><th>Default</th><th>Notes</th></tr>
-  <tr><td>Driver Version, Status, Active Source, Metadata Sources, Web View URL, LAN URL</td><td>&ndash;</td><td>Read-only. <b>Status</b> shows what is playing (&ldquo;Playing &mdash; The Bear (Netflix on Living Room Roku)&rdquo;) plus any per-source error.</td></tr>
+  <tr><td>Driver Version, Status, Active Source, Metadata Sources, Web View URL, LAN URL</td><td>&ndash;</td><td>Read-only. <b>Status</b> shows what is playing (&ldquo;Playing &mdash; The Bear (Netflix on Living Room Roku)&rdquo;) plus any per-source or LAN port error. <b>Web View URL</b> is what the button opens (with the relay address and token); <b>LAN URL</b> is the relay / page address for LAN browsers, or why the port is not listening.</td></tr>
   <tr><td>Room</td><td>(empty)</td><td>Room to report on; empty = the room the driver is in.</td></tr>
   <tr><td>Use Control4 Room Media</td><td>On</td><td>See Sources.</td></tr>
   <tr><td>Show Only When Room Is On</td><td>Off</td><td>See Sources.</td></tr>
@@ -122,7 +139,7 @@ sends that one image back (<b>Embed LAN Artwork = On</b>). Only images of what i
   <tr><td>Metadata Language, Content Rating Country</td><td>en-US, US</td><td></td></tr>
   <tr><td>Poll Interval Playing / Idle</td><td>2 s / 5 s</td><td>How often sources are asked while something plays / while idle.</td></tr>
   <tr><td>Embed LAN Artwork</td><td>On</td><td>Let the page ask the controller for LAN-only artwork (up to 256 KB per image, last 12 cached) so remote apps can show it. Off: remote apps show generated artwork instead.</td></tr>
-  <tr><td>LAN Web Port</td><td>0 (off)</td><td>Optional: serve the page and <code>/api/state</code> JSON on <code>http://&lt;controller-ip&gt;:&lt;port&gt;/</code> for browsers/kiosks on the LAN. Unauthenticated, LAN only.</td></tr>
+  <tr><td>LAN Web Port</td><td>8487 (on)</td><td>The <a href="#relay">LAN relay</a>: the page&rsquo;s fallback data channel, plus the page itself for browsers/kiosks on the LAN at the address shown in <b>LAN URL</b> (<code>http://&lt;controller-ip&gt;:&lt;port&gt;/?k=&lt;token&gt;</code>). Data (<code>/api/state</code>, <code>/api/artwork</code>) needs the token. Touch screens must reach this TCP port. 0 = off.</td></tr>
   <tr><td>Debug Mode</td><td>Off</td><td>Print, Log, or Print and Log. Keys and tokens are redacted.</td></tr>
 </table>
 
@@ -208,7 +225,8 @@ WHEN Now Playing Info  Details Available
   <li>The <b>Gracenote</b> path is implemented to the published API but has not been tested against the live service.</li>
   <li>Remote access: LAN artwork is relayed by the controller only up to 256 KB per image; larger images show on the LAN only
       (remote apps show generated artwork). Internet images (TMDB, iTunes&hellip;) load directly.</li>
-  <li>The optional LAN web port has no authentication: only enable it on a trusted network.</li>
+  <li>The LAN relay is plain HTTP on your LAN, protected by the token in the button&rsquo;s URL (anyone who has the URL can read what is playing,
+      nothing more: the driver is read-only). Set <b>LAN Web Port = 0</b> to turn it off.</li>
 </ul>
 
 <h2 id="trouble">Troubleshooting</h2>
@@ -221,7 +239,7 @@ WHEN Now Playing Info  Details Available
   <tr><td>No posters / synopsis</td><td>Run <b>Test Metadata Sources</b>; check the TMDB key and that the controller can reach the internet.</td></tr>
   <tr><td>Wrong movie matched</td><td>Run <b>Clear Metadata Cache</b>; very generic titles may match the wrong film. Send us <b>Print State</b> output.</td></tr>
   <tr><td>Button missing in Navigator</td><td>Make it visible under the room&rsquo;s Watch/Listen menus and refresh Navigators.</td></tr>
-  <tr><td>Page shows &ldquo;reconnecting&rdquo;</td><td>The Navigator did not get data; check the driver is running (Status) and refresh Navigators.</td></tr>
+  <tr><td>Page shows &ldquo;reconnecting&rdquo; / stays on &ldquo;Connecting&rdquo;</td><td>Neither the Navigator nor the LAN relay delivered data. Check the driver is running (Status), that <b>LAN URL</b> shows an address (not an error), that the touch screen can reach the controller on the LAN Web Port (firewall / VLAN), and refresh Navigators. After a controller reboot allow about a minute for the button URL to be re-sent.</td></tr>
   <tr><td>Anything else</td><td>Set Debug Mode = Print, reproduce, and send the Lua output (keys are redacted).</td></tr>
 </table>
 

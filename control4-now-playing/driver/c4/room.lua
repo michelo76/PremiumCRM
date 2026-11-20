@@ -11,9 +11,18 @@ whenever the room is on and media info is non-empty.
 The XML shape of 1031 is undocumented: source drivers feed it with UPDATE_MEDIA_INFO
 (TITLE, ALBUM, ARTIST, GENRE, IMAGEURL -- IMAGEURL sometimes base64-encoded), others with
 LINE1/LINE2/LINE3. parse_media_info is therefore deliberately tolerant.
+A verbatim live capture (tests/fixtures/c4room_mediainfo_live.xml):
+  <mediainfo><roomId>16</roomId><mediatype>SONG</mediatype><artist>Gabel</artist>
+  <album>BeNi</album><title>Beni</title><img>aHR0cDovLzE5Mi4x...</img><deviceid>83</deviceid></mediainfo>
+-- <img> is a base64 URL, text is XML-entity-escaped (&amp;), <deviceid> names the source device
+(CURRENT_SELECTED_DEVICE can read 0 meanwhile). CURRENT_MEDIA (1005) reads as an empty shell
+<mediainfo><mediaid>0</mediaid><mediatype/></mediainfo> while playing: "no info". 1005 is only
+used when 1031 has nothing.
 
 Pure helpers
-  Room.parse_media_info(str) -> { title, artist, album, genre, image } | nil
+  Room.parse_media_info(str) -> { title, artist, album, genre, image, device_id, media_type } | nil
+  Room.kind_of(media_type)   -> "music" | "movie" | "video" | "unknown" | nil (no media type)
+  Room.valid_device(v)       -> device id number | nil (0, empty, 4294967295 = none)
   Room.is_on(snapshot)       -> true | false | nil (unknown)
   Room.to_playback(snapshot, device_name) -> playback (np.playback shape)
 Watcher (C4 injected)
@@ -44,6 +53,25 @@ local FIELDS = {
   image = { "imageurl", "image", "img", "imgurl", "art", "arturl", "artwork", "artworkurl", "albumart",
     "albumarturl", "coverart", "coverarturl", "cover", "thumbnail", "thumb" },
 }
+
+-- <mediatype> values (lower-cased) -> np kind. Only values that plainly name the kind; any other
+-- media type is "unknown" (no type at all: the artist/album heuristic decides).
+M.MEDIA_TYPES = {
+  song = "music", track = "music", music = "music", audio = "music", album = "music",
+  movie = "movie", film = "movie",
+  video = "video", tv = "video", episode = "video", show = "video",
+}
+
+function M.kind_of(media_type)
+  if type(media_type) ~= "string" or media_type == "" then return nil end
+  return M.MEDIA_TYPES[media_type:lower()] or "unknown"
+end
+
+function M.valid_device(v)
+  local n = tonumber(v)
+  if not n or n <= 0 or n >= 4294967295 then return nil end
+  return n
+end
 
 local function norm_tag(t)
   t = tostring(t):lower():gsub("^.*:", "") -- strip namespace prefix
@@ -138,11 +166,20 @@ function M.parse_media_info(s)
     end
   end
   if not (out.title or out.artist or out.album) then return nil end
+  out.device_id = M.valid_device(clean(found.deviceid))
+  local mt = clean(found.mediatype)
+  if mt then out.media_type = mt:lower() end
   return any and out or nil
 end
 
 local ON = { ["1"] = true, on = true, ["true"] = true, yes = true }
 local OFF = { ["0"] = true, off = true, ["false"] = true, no = true }
+
+-- the room's media info: 1031, else 1005 (CURRENT_MEDIA; its empty shell parses to nil)
+function M.media_info(snap)
+  snap = snap or {}
+  return M.parse_media_info(snap[M.VAR.MEDIA_INFO]) or M.parse_media_info(snap[M.VAR.MEDIA])
+end
 
 function M.is_on(snap)
   snap = snap or {}
@@ -152,8 +189,11 @@ function M.is_on(snap)
     if ON[p] then return true end
     if OFF[p] then return false end
   end
-  local sel = tonumber(snap[M.VAR.SELECTED])
-  if sel ~= nil then return sel > 0 end
+  -- no usable POWER_STATE: any source device named anywhere means on
+  if M.valid_device(snap[M.VAR.SELECTED]) or M.valid_device(snap[M.VAR.PLAYING_AUDIO]) then return true end
+  local info = M.media_info(snap)
+  if info and info.device_id then return true end
+  if tonumber(snap[M.VAR.SELECTED]) ~= nil then return false end
   return nil
 end
 
@@ -169,11 +209,11 @@ function M.to_playback(snap, device_name, now)
     pb.playback.state = "off"
     return pb
   end
-  local info = M.parse_media_info(snap[M.VAR.MEDIA_INFO])
+  local info = M.media_info(snap)
   if info and on ~= false then
     pb.playback.state = "playing"
     pb.media = {
-      kind = (info.artist or info.album) and "music" or "unknown",
+      kind = M.kind_of(info.media_type) or ((info.artist or info.album) and "music" or "unknown"),
       title = info.title, artist = info.artist, album = info.album,
       genres = info.genre and { info.genre } or {},
       artwork_url = info.image,
@@ -247,10 +287,20 @@ end
 function R:snapshot() return self.snap end
 function R:is_on() return M.is_on(self.snap) end
 
+-- source device: CURRENT_SELECTED_DEVICE, else the media info's <deviceid> (the selected
+-- device can read 0 / 4294967295 while music plays), else PLAYING_AUDIO_DEVICE
+function R:device_id()
+  local id = M.valid_device(self.snap[M.VAR.SELECTED])
+  if not id then
+    local info = M.media_info(self.snap)
+    id = info and info.device_id
+  end
+  return id or M.valid_device(self.snap[M.VAR.PLAYING_AUDIO])
+end
+
 function R:device_name()
-  local id = tonumber(self.snap[M.VAR.SELECTED])
-  if not id or id <= 0 then id = tonumber(self.snap[M.VAR.PLAYING_AUDIO]) end
-  if not id or id <= 0 then return nil end
+  local id = self:device_id()
+  if not id then return nil end
   if self.C4.GetDeviceDisplayName then
     local ok, name = pcall(self.C4.GetDeviceDisplayName, self.C4, id)
     if ok and type(name) == "string" and name ~= "" then return name end
@@ -276,14 +326,16 @@ function R:raw_report()
     end
     lines[#lines + 1] = string.format("  %d %s = %s", v, names[v], val == nil and "(nil)" or ("[[" .. tostring(val) .. "]]"))
   end
-  local info = M.parse_media_info(self.snap[M.VAR.MEDIA_INFO])
+  local info = M.media_info(self.snap)
   if info then
     lines[#lines + 1] = "  parsed: title=" .. tostring(info.title) .. " artist=" .. tostring(info.artist) ..
-      " album=" .. tostring(info.album) .. " genre=" .. tostring(info.genre) .. " image=" .. tostring(info.image)
+      " album=" .. tostring(info.album) .. " genre=" .. tostring(info.genre) .. " image=" .. tostring(info.image) ..
+      " mediatype=" .. tostring(info.media_type) .. " deviceid=" .. tostring(info.device_id)
   else
     lines[#lines + 1] = "  parsed: (no media info)"
   end
-  lines[#lines + 1] = "  room on: " .. tostring(M.is_on(self.snap)) .. ", device: " .. tostring(self:device_name())
+  lines[#lines + 1] = "  room on: " .. tostring(M.is_on(self.snap)) .. ", device: " .. tostring(self:device_name()) ..
+    " (" .. tostring(self:device_id()) .. ")"
   return table.concat(lines, "\n")
 end
 

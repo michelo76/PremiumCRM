@@ -6,7 +6,7 @@ the packaged copy (the source tree keeps "dev").
 
 local M = {}
 
-M.VERSION = "1.0.0"
+M.VERSION = "1.1.0"
 M.BUILD_DATE = "dev"
 M.DRIVER_FILENAME = "now_playing_info"   -- c4z name without extension (webview URL depends on it)
 M.PROXY_BINDING = 5001

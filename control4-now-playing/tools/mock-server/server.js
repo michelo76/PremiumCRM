@@ -3,8 +3,15 @@
  * Now Playing Info – mock dev server (no npm dependencies).
  *
  *   node tools/mock-server/server.js [--port 8099] [--fixture movie-full] [--cycle-seconds 20]
+ *                                    [--relay-port 8487] [--relay-key mock-relay-key-0001]
  *
  * Serves driver/www at "/" and a fake controller API at "/api/state".
+ * With --relay-port, a second listener emulates the driver's LAN relay (c4/httpserver.lua):
+ *   GET /api/state?k=<key>[&inm=<etag>]   the server-wide fixture; 401 without the key; ETag/304
+ *   GET /api/artwork?url=<u>&k=<key>      a generated image for image URLs of that state (403 otherwise)
+ *   OPTIONS -> 204; CORS: Access-Control-Allow-Origin: *, Expose-Headers: ETag, Date
+ * Open the page as /?c4mock=1&c4dead=1&relay=http://127.0.0.1:<relay-port>&k=<key> to exercise the
+ * fallback (set the fixture with /_mock/set?fixture=<name>).
  *
  * Fixture selection for /api/state (first match wins):
  *   1. ?fixture=<name> on the api request (the page forwards its own ?fixture= param)
@@ -38,6 +45,8 @@ function arg(name, def) {
 }
 
 const PORT = parseInt(arg('port', process.env.PORT || '8099'), 10);
+const RELAY_PORT = parseInt(arg('relay-port', '0'), 10);
+const RELAY_KEY = arg('relay-key', 'mock-relay-key-0001');
 const CYCLE_SECONDS = Math.max(3, parseFloat(arg('cycle-seconds', '20')));
 const WWW = path.resolve(__dirname, '../../driver/www');
 const FIXTURES = path.resolve(__dirname, 'fixtures');
@@ -172,7 +181,12 @@ function indexPage() {
  * GET_ARTWORK {url} -> onDataToUi({NOW_PLAYING_ARTWORK: {url, data}}) like c4/app.lua: only image URLs
  * of the last pushed state are served (else {url, error}); same-origin URLs (/_mock/img/...) are
  * fetched and inlined as data: URIs, unreachable LAN URLs get a generated local image.
+ * The boolean flag is honoured like the real API (Snap One: true = protocol/driver, false = proxy):
+ * by default only subscriptions / commands with protocol=true are served; ?c4proxy=1 emulates a runtime
+ * where only the proxy flag (false) works. Calls on the wrong channel are logged and ignored.
  * ?c4drop=N  ignores the first N GET_STATE commands (tests the no-response -> retry path).
+ * ?c4dead=1  the JS API exists but never delivers anything (field finding on a real touch screen).
+ * ?c4delay=MS  answers GET_STATE only after MS milliseconds.
  * /_mock/fail?on=1 makes the fake driver go silent (no pushes, no replies).
  * window.__c4log records calls for tests.
  */
@@ -180,6 +194,9 @@ const C4_MOCK = '(' + function () {
   var q = {};
   location.search.replace(/^\?/, '').split('&').forEach(function (p) { var i = p.indexOf('='); if (i > 0) q[p.slice(0, i)] = decodeURIComponent(p.slice(i + 1)); });
   var drop = +(q.c4drop || 0), shape = 0, lastV = null, timer = null, lastState = null;
+  var proxyOnly = q.c4proxy === '1', dead = q.c4dead === '1', delay = +(q.c4delay || 0);
+  var subs = { dtu: false, vari: false };
+  function works(flag) { return proxyOnly ? flag === false : flag === true; }
   var log = window.__c4log = [];
   function api() { return '/api/state' + (q.fixture ? '?fixture=' + encodeURIComponent(q.fixture) : ''); }
   function fetchState(cb) {
@@ -192,7 +209,10 @@ const C4_MOCK = '(' + function () {
     return out;
   }
   function artwork(url) {
-    function reply(x) { log.push('artwork:' + url + ':' + (x.data ? 'data' : x.error)); window.onDataToUi({ NOW_PLAYING_ARTWORK: x }); }
+    function reply(x) {
+      log.push('artwork:' + url + ':' + (x.data ? 'data' : x.error));
+      if (subs.dtu) window.onDataToUi({ NOW_PLAYING_ARTWORK: x }); else log.push('undelivered:artwork');
+    }
     if (stateImages(lastState).indexOf(url) < 0) return reply({ url: url, error: 'not in current state' });
     var local = /^\//.test(url) ? url : '/_mock/img/600x600/lan-' + url.length + '.svg?label=LAN';
     fetch(local).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); }).then(function (b) {
@@ -204,6 +224,12 @@ const C4_MOCK = '(' + function () {
   function deliver(st) {
     lastState = st;
     var json = JSON.stringify(st), s = shape++ % 5;
+    var viaVar = s === 0 || s === 4;
+    if (viaVar && !subs.vari) viaVar = false;
+    if (!viaVar && !subs.dtu) viaVar = subs.vari;
+    if (!subs.vari && !subs.dtu) { log.push('undelivered:' + st.version); return; }
+    if (viaVar && s !== 0 && s !== 4) s = 0;
+    if (!viaVar && (s === 0 || s === 4)) s = 2;
     log.push('push:' + s + ':' + st.version);
     if (s === 0) window.onVariable(JSON.stringify({ name: 'STATE_JSON', value: json }));
     else if (s === 1) window.onDataToUi(JSON.stringify({ STATE_JSON: json }));
@@ -213,14 +239,24 @@ const C4_MOCK = '(' + function () {
   }
   function watch() { if (lastV === null) return; fetchState(function (st) { if (st && st.version !== lastV) { lastV = st.version; deliver(st); } }); }
   window.C4 = {
-    subscribeToDataToUi: function (b) { log.push('subscribeToDataToUi:' + b); if (!timer) timer = setInterval(watch, 1000); },
-    subscribeToVariable: function (n, b) { log.push('subscribeToVariable:' + n + ':' + b); },
+    subscribeToDataToUi: function (b) {
+      log.push('subscribeToDataToUi:' + b);
+      if (!works(b)) return;
+      subs.dtu = true;
+      if (!timer) timer = setInterval(watch, 1000);
+    },
+    subscribeToVariable: function (n, b) {
+      log.push('subscribeToVariable:' + n + ':' + b);
+      if (n === 'STATE_JSON' && works(b)) { subs.vari = true; if (!timer) timer = setInterval(watch, 1000); }
+    },
     sendCommand: function (name, params, async, proto) {
       log.push('sendCommand:' + name + ':' + params + ':' + async + ':' + proto);
+      if (!works(proto)) { log.push('ignored:' + name + ':' + proto); return; }
+      if (dead) return;
       if (name === 'GET_ARTWORK') { try { artwork(JSON.parse(params).url); } catch (e) { log.push('bad GET_ARTWORK'); } return; }
       if (name !== 'GET_STATE') return;
       if (drop > 0) { drop--; log.push('dropped'); return; }
-      fetchState(function (st) { if (st) { lastV = st.version; deliver(st); } });
+      setTimeout(function () { fetchState(function (st) { if (st) { lastV = st.version; deliver(st); } }); }, delay);
     },
   };
 }.toString() + ')();';
@@ -280,6 +316,40 @@ const server = http.createServer((req, res) => {
     send(res, 200, body, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
   });
 });
+
+// ---------------------------------------------------------------- LAN relay emulation (--relay-port)
+const relayStats = { state: 0, unauthorized: 0, notModified: 0, artwork: 0 };
+function stateImageUrls(st) {
+  const d = (st && st.details) || {};
+  return [st && st.media && st.media.artwork_url, st && st.source && st.source.app_icon_url, d.poster_url, d.backdrop_url,
+    d.logo_url, d.music && d.music.artist_image_url, d.episode && d.episode.still_url].filter((u) => typeof u === 'string' && u);
+}
+const relay = http.createServer((req, res) => {
+  const u = url.parse(req.url, true);
+  const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'ETag, Date', 'Connection': 'close' };
+  const out = (code, body, headers) => { res.writeHead(code, Object.assign({}, cors, headers || {})); res.end(body); };
+  if (req.method === 'OPTIONS') return out(204, '', { 'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS', 'Access-Control-Allow-Headers': 'If-None-Match' });
+  if (u.pathname === '/_stats') return out(200, JSON.stringify(relayStats), { 'Content-Type': 'application/json' });
+  if (u.pathname !== '/api/state' && u.pathname !== '/api/artwork') return out(404, 'not found\n', { 'Content-Type': 'text/plain' });
+  if (u.query.k !== RELAY_KEY) { relayStats.unauthorized++; return out(401, '{"error":"unauthorized"}\n', { 'Content-Type': 'application/json' }); }
+  const st = resolveState(current);
+  if (!st) return out(404, '{"error":"unknown fixture"}', { 'Content-Type': 'application/json' });
+  if (u.pathname === '/api/artwork') {
+    relayStats.artwork++;
+    const want = String(u.query.url || '');
+    const ok = stateImageUrls(st).some((x) => x === want || new URL(x, 'http://127.0.0.1:' + PORT + '/').href === want);
+    if (!ok) return out(403, '{"error":"not in current state"}\n', { 'Content-Type': 'application/json' });
+    return out(200, mockImage(600, 600, 'relay-' + want.length, 'RELAY'), { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'private, max-age=300' });
+  }
+  st.sent_at = Math.floor(nowS());
+  const body = JSON.stringify(st);
+  const etag = '"' + crypto.createHash('sha1').update(body.replace(/"sent_at":\d+,?/, '')).digest('hex').slice(0, 16) + '"';
+  const inm = req.headers['if-none-match'] || u.query.inm;
+  if (inm === etag) { relayStats.notModified++; return out(304, '', { ETag: etag, 'Cache-Control': 'no-store' }); }
+  relayStats.state++;
+  return out(200, body, { 'Content-Type': 'application/json; charset=utf-8', ETag: etag, 'Cache-Control': 'no-store', Date: new Date().toUTCString() });
+});
+if (RELAY_PORT > 0) relay.listen(RELAY_PORT, () => console.log('LAN relay emulation on http://127.0.0.1:' + RELAY_PORT + '/ (k=' + RELAY_KEY + ')'));
 
 server.listen(PORT, () => {
   console.log('Now Playing mock server on http://localhost:' + PORT + '/  (fixtures: /_mock/)');

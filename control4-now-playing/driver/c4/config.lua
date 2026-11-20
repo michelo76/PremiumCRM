@@ -22,6 +22,7 @@ Every property is optional; defaults match driver.xml.
 local M = {}
 
 M.ROOM_PROVIDER_ID = "c4room"
+M.DEFAULT_LAN_PORT = 8487 -- LAN relay on by default (driver.xml "LAN Web Port"); 0 = off
 M.ROKU_GROUP = "dev-roku"
 M.APPLETV_GROUP = "dev-appletv"
 
@@ -214,7 +215,7 @@ function M.build(Properties, ctx)
   local idle_s = int(Properties["Poll Interval Idle"], 5, 2, 120)
 
   info.embed_artwork = on(Properties["Embed LAN Artwork"], true)
-  info.lan_port = int(Properties["LAN Web Port"], 0, 0, 65535)
+  info.lan_port = int(Properties["LAN Web Port"], M.DEFAULT_LAN_PORT, 0, 65535)
   local dm = trim(Properties["Debug Mode"]) or "Off"
   info.debug_mode = DEBUG_MODES[dm] and dm or "Off"
 

@@ -14,11 +14,17 @@ A faithful-enough mock of the Control4 DriverWorks Lua API for driving driver.lu
   m:device(id, name, vars)      -- define a device (rooms: ids from m.room_id)
   m:set_var(dev, var, value)    -- change a device variable (fires listeners)
   m:connect(h) / m:client_send(h, data) / m:client_close(h)   -- LAN server clients
+                                --   (OnServerDataIn / ...StatusChanged get the client address,
+                                --   port and the CreateServer identifier appended, OS 3.3.1+)
+  m.create_server_fail = { "address in use", ... }   -- next CreateServer calls return false, err
+  m.legacy_create_server = true -- pre-3.3.1: CreateServer(port) only (extra args throw)
+  m.controller_ip = "192.168.1.5"  -- C4:GetControllerNetworkAddress() ("" = unknown yet)
   m:call(fn_name, ...)          -- call a global driver entry point
 
 Recorded: m.added_vars (ordered), m.vars, m.set_log, m.events, m.proxy, m.data_to_ui,
 m.requests, m.updated_props, m.prints, m.errors, m.violations, m.server, m.sent, m.closed,
-m.listeners. os.time() and print() are redirected to the active mock while one is active.
+m.listeners, m.misuse (API misuse, e.g. DestroyServer without a port).
+os.time() and print() are redirected to the active mock while one is active.
 ]]
 
 local util = require("np.util")
@@ -106,7 +112,8 @@ function M.new(opts)
     added_vars = {}, vars = {}, set_log = {}, events = {}, proxy = {}, data_to_ui = {},
     requests = {}, routes = {}, updated_props = {}, prints = {}, errors = {}, debuglog = {},
     violations = {}, persist = {}, listeners = {}, server = nil, servers_created = 0,
-    sent = {}, closed = {}, files = {}, file_handles = 0, phase = "loaded", echo = opts.echo,
+    sent = {}, closed = {}, files = {}, file_handles = 0, phase = "loaded", echo = opts.echo, misuse = {},
+    create_server_fail = {}, controller_ip = "192.168.1.5",
   }, Mock)
   m.xml = M.parse_driver_xml(opts.xml or (m.root .. "/driver.xml"))
   m.Properties = {}
@@ -235,15 +242,22 @@ end
 
 -- server --------------------------------------------------------------------
 
+M.CLIENT_ADDR = "192.168.1.77"
+
 function Mock:connect(h)
   assert(self.server, "no server")
-  self:call("OnServerConnectionStatusChanged", h, self.server.port, "ONLINE")
+  self:call("OnServerConnectionStatusChanged", h, self.server.port, "ONLINE", M.CLIENT_ADDR, self.server.identifier)
 end
 
-function Mock:client_send(h, data) self:call("OnServerDataIn", h, data) end
+function Mock:client_send(h, data, identifier)
+  local srv = self.server or {}
+  if identifier == nil then identifier = srv.identifier end
+  self:call("OnServerDataIn", h, data, M.CLIENT_ADDR, srv.port, identifier)
+end
 
 function Mock:client_close(h)
-  self:call("OnServerConnectionStatusChanged", h, self.server and self.server.port or 0, "OFFLINE")
+  local srv = self.server or {}
+  self:call("OnServerConnectionStatusChanged", h, srv.port or 0, "OFFLINE", M.CLIENT_ADDR, srv.identifier)
 end
 
 function Mock:response(h) return table.concat(self.sent[h] or {}) end
@@ -349,12 +363,27 @@ function Mock:_build_c4()
   function C4:UnregisterVariableListener(dev, var)
     m.listeners[dev .. ":" .. var] = nil
   end
-  function C4:CreateServer(port)
+  -- C4:CreateServer(nPort, strDelimiter, bUseUDP, strIdentifier): returns false, err on failure
+  -- (it does not throw); the identifier (OS 3.3.1+) comes back on OnServerDataIn / status.
+  function C4:CreateServer(port, delimiter, udp, identifier)
     m:_check("CreateServer")
-    m.server = { port = port }
+    if m.legacy_create_server and (delimiter ~= nil or udp ~= nil or identifier ~= nil) then
+      error("bad argument #2 to 'CreateServer'")
+    end
+    if #m.create_server_fail > 0 then
+      local err = table.remove(m.create_server_fail, 1)
+      return false, err
+    end
+    if m.server and m.server.port == port then return false, "Address already in use" end
+    m.server = { port = port, delimiter = delimiter, udp = udp, identifier = identifier }
     m.servers_created = m.servers_created + 1
+    return true
   end
-  function C4:DestroyServer() m.server = nil end
+  -- C4:DestroyServer(nPort): without the port nothing is destroyed (the listener stays up).
+  function C4:DestroyServer(port)
+    if port == nil then m.misuse[#m.misuse + 1] = "DestroyServer without a port"; return end
+    if m.server and m.server.port == tonumber(port) then m.server = nil end
+  end
   function C4:ServerSend(h, data)
     assert(type(data) == "string")
     m.sent[h] = m.sent[h] or {}
@@ -363,7 +392,7 @@ function Mock:_build_c4()
   function C4:ServerCloseClient(h) m.closed[h] = true end
   function C4:GetControllerNetworkAddress()
     m:_check("GetControllerNetworkAddress")
-    return "192.168.1.5"
+    return m.controller_ip
   end
   function C4:FileSetDir(dir) m.file_dir = dir end
   function C4:FileOpen(path)

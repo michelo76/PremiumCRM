@@ -10,7 +10,10 @@
   Now Playing Info – Control4 driver web UI.
   Single self-contained file: no sub-resources (no external CSS/JS/fonts/url()), so it loads from
   controller://driver/now_playing_info/index.html locally and remotely. Only remote artwork is fetched.
-  Data: Control4 Navigator JS API (window.C4) when present, else HTTP polling of "api/state".
+  Data, in order: Control4 Navigator JS API (window.C4; protocol flag first, proxy flag as fallback);
+  then, when that delivers nothing within ~5 s and the web view URL carries ?relay=<http://ip:port>&k=<token>,
+  the driver's LAN relay (<relay>/api/state, <relay>/api/artwork); without window.C4, HTTP polling of
+  "api/state" (or the relay).
 -->
 <style>
 :root{
@@ -437,6 +440,9 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
   });
   var KIOSK = Q.kiosk === '1' || Q.kiosk === 'true';
   if (KIOSK) D.body.classList.add('kiosk');
+  // LAN relay pointer + token from the driver's web_view_url (?relay=http://<controller>:<port>&k=<token>)
+  var RELAY = (function (r) { r = String(r || '').replace(/\/+$/, ''); return /^https?:\/\/[^\/?#\s]+$/i.test(r) ? r : ''; })(Q.relay);
+  var KEY = /^[\w-]{8,128}$/.test(String(Q.k || '')) ? String(Q.k) : '';
 
   // ------------------------------------------------------------------ small helpers
   function isObj(x) { return !!x && typeof x === 'object' && !Array.isArray(x); }
@@ -576,8 +582,11 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
   // A remote Navigator cannot reach LAN images (Roku icons, Home Assistant / Apple TV bridge artwork).
   // The state keeps original URLs; the page asks the driver for a data: URI when the host is private-LAN
   // or relative (same rule as c4/artwork.lua is_lan) or when loading the URL directly failed:
-  //   C4.sendCommand('GET_ARTWORK', '{"url":...}') -> onDataToUi(... {url, data} | {url, error})
+  //   C4.sendCommand('GET_ARTWORK', '{"url":...}', true, true) -> onDataToUi(... {url, data} | {url, error})
+  // (protocol flag; the proxy flag is tried as well when no reply came within 4 s, or straight away when
+  // GET_STATE only got an answer after a proxy-flag retry).
   // One request per URL, results cached by URL. Not used in HTTP/LAN mode (same LAN as the images).
+  // While the LAN relay delivers the state, LAN images come from <relay>/api/artwork?url=&k= instead.
   function isLan(u) {
     u = str(u);
     if (!u || /^data:/i.test(u)) return false;
@@ -601,7 +610,10 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
     if (art.failed[src] && Date.now() < art.failed[src]) return cb(null);
     if (art.wait[src]) { art.wait[src].push(cb); return; }
     art.wait[src] = [cb];
-    try { W.C4.sendCommand('GET_ARTWORK', JSON.stringify({ url: src }), true, false); } catch (e) { /* host not ready */ }
+    var body = JSON.stringify({ url: src });
+    c4Send('GET_ARTWORK', body, true);
+    if (c4.both) c4Send('GET_ARTWORK', body, false);
+    else setTimeout(function () { if (art.wait[src]) c4Send('GET_ARTWORK', body, false); }, 4000);
     setTimeout(function () { if (art.wait[src]) artReply({ url: src, error: 'timeout' }); }, 12000);
   }
   function artReply(r) {
@@ -613,7 +625,13 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
   }
   // loadImg with driver help: cb(img|null, cors). LAN URLs go through the driver straight away;
   // other URLs are tried directly first and fetched by the driver only if that fails.
+  function relayArt(src) { return RELAY + '/api/artwork?url=' + encodeURIComponent(src) + '&k=' + encodeURIComponent(KEY); }
   function loadArt(src, wantCors, cb) {
+    if (relayLive()) {
+      // the relay is on the same LAN as the images and adds the driver-side credentials (Apple TV bridge)
+      if (isLan(src)) return loadImg(relayArt(src), wantCors, function (im, cors) { if (im) cb(im, cors); else loadImg(src, wantCors, cb); });
+      return loadImg(src, wantCors, function (im, cors) { if (im) cb(im, cors); else loadImg(relayArt(src), wantCors, cb); });
+    }
     if (!artHelp()) return loadImg(src, wantCors, cb);
     function viaDriver() { askArt(src, function (d) { if (d) loadImg(d, wantCors, cb); else cb(null); }); }
     if (art.data[src] || isLan(src)) return viaDriver();
@@ -1255,11 +1273,16 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
   var curModelPending = null;
 
   // ------------------------------------------------------------------ ingest (shared by both transports)
+  var curVia = null, curAt = 0;
   function ingest(st, via, dateSkew) {
     if (!isObj(st) || !isObj(st.playback)) return;
     var v = st.version;
     var same = cur && v != null && v === cur.version && st.media_key === cur.media_key;
     if (same) return;
+    // two live channels (C4 + relay): the newer version wins; an older one from the other channel is a
+    // stale copy (bounded in time so a driver restart, which restarts the counter, is not ignored)
+    if (cur && via !== curVia && num(v) != null && num(cur.version) != null && v < cur.version && Date.now() - curAt < 15000) return;
+    curVia = via; curAt = Date.now();
     // Clock skew between this device and the controller (seconds). Prefer an explicit send time,
     // then the HTTP Date header; else derive from updated_at once per version.
     var local = nowS(), sent = num(st.sent_at) || num(st.server_time) || num(st.now);
@@ -1310,87 +1333,146 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
   function extractState(x) { var p = extractPayload(x, 0); return p && p.state || null; }
   function pri(k) { return /^(STATE_JSON|state|value|NOW_PLAYING|NOW_PLAYING_ARTWORK|payload|data)$/i.test(k) ? 0 : 1; }
 
-  var c4 = { active: false, wd: null, miss: 0, seen: false };
-  function c4Receive(x) {
+  // Snap One's Navigator JS API: the boolean argument selects the PROTOCOL (driver: STATE_JSON variable,
+  // C4:SendDataToUI, ExecuteCommand) when true and the PROXY when false. Protocol is primary; the proxy
+  // channel is kept as a fallback (subscribed too; GET_STATE / GET_ARTWORK also sent with it on retries).
+  // Each call is guarded on its own: one throwing must not stop the others.
+  var c4 = { active: false, wd: null, miss: 0, seen: false, ok: false, both: false };
+  function c4Send(name, params, protocol) {
+    try { W.C4.sendCommand(name, params, true, protocol); return true; } catch (e) { return false; }
+  }
+  function c4Receive(x, via) {
     var p = extractPayload(x, 0);
     if (!p) return;
     if (p.art) return artReply(p.art);
-    var st = p.state;
-    c4.seen = true; c4.miss = 0; clearTimeout(c4.wd); c4.wd = null;
-    setConn(false);
-    ingest(st, 'c4');
+    if (!c4.seen && c4.miss > 0) c4.both = true; // answered only after a proxy-flag retry
+    c4.seen = true; c4.ok = true; c4.miss = 0; clearTimeout(c4.wd); c4.wd = null;
+    noteVia(via, x);
+    if (http.on && http.relay) stopPoll(); // the C4 channel works: no LAN polling any more
+    updConn();
+    ingest(p.state, via);
   }
   function c4Request() {
     clearTimeout(c4.wd);
-    try { W.C4.sendCommand('GET_STATE', '{}', true, false); } catch (e) { /* host may throw if not ready */ }
+    c4Send('GET_STATE', '{}', true);                  // ExecuteCommand in the driver
+    if (c4.miss > 0) c4Send('GET_STATE', '{}', false); // ReceivedFromProxy (retries only)
     var wait = Math.min(5000 * Math.pow(2, c4.miss), 30000);
     c4.wd = setTimeout(function () {
-      c4.miss++;
-      setConn(true);
+      c4.miss++; c4.ok = false;
+      // nothing valid from the JS API within ~5 s: fall back to the LAN relay when the URL has one
+      if (!c4.seen && RELAY && KEY && !http.on) startPoll(true);
+      updConn();
       if (!cur) showIdle(null);
       c4Request();
     }, wait);
   }
   // Global callbacks required by the Navigator JS API. Defined unconditionally (harmless otherwise).
-  // __npLast keeps the raw payloads for hardware checks from the web view's JS console.
-  var npLast = W.__npLast = { dataToUi: null, variable: null };
-  W.onDataToUi = function (x) { npLast.dataToUi = x; c4Receive(x); };
-  W.onVariable = function (x) { npLast.variable = x; c4Receive(x); };
+  // __npLast keeps the raw payloads and which channel delivered last, for hardware checks from the web
+  // view's JS console: via = 'dataToUi' | 'variable' | 'http' | 'relay', at = ms epoch, raw = payload.
+  var npLast = W.__npLast = { dataToUi: null, variable: null, via: null, at: null, raw: null,
+    counts: { dataToUi: 0, variable: 0, http: 0, relay: 0 }, subscribe: [] };
+  function noteVia(via, raw) { npLast.via = via; npLast.at = Date.now(); npLast.raw = raw; npLast.counts[via] = (npLast.counts[via] || 0) + 1; }
+  W.onDataToUi = function (x) { npLast.dataToUi = x; c4Receive(x, 'dataToUi'); };
+  W.onVariable = function (x) { npLast.variable = x; c4Receive(x, 'variable'); };
   W.onSendCommandError = function (msg) {
     if (W.console) console.warn('C4 sendCommand error', msg);
-    if (c4.active) { setConn(true); }
   };
   W.onSubscribeToVariableError = function (name, msg) { if (W.console) console.warn('C4 subscribe error', name, msg); };
 
+  function c4Sub(label, fn) {
+    try { fn(); npLast.subscribe.push(label + ':ok'); } catch (e) { npLast.subscribe.push(label + ':threw'); }
+  }
   function startC4() {
     c4.active = true;
-    try { W.C4.subscribeToVariable('STATE_JSON', false); } catch (e) { /* ignore */ }
-    try { W.C4.subscribeToDataToUi(false); } catch (e) { /* ignore */ }
+    // proxy first, protocol last: should a host keep only the latest subscription, protocol wins
+    c4Sub('variable:proxy', function () { W.C4.subscribeToVariable('STATE_JSON', false); });
+    c4Sub('dataToUi:proxy', function () { W.C4.subscribeToDataToUi(false); });
+    c4Sub('variable:protocol', function () { W.C4.subscribeToVariable('STATE_JSON', true); });
+    c4Sub('dataToUi:protocol', function () { W.C4.subscribeToDataToUi(true); });
     c4Request();
     D.addEventListener('visibilitychange', function () { if (!D.hidden) c4Request(); });
   }
 
-  // ------------------------------------------------------------------ transport (b): HTTP polling
-  var http = { etag: null, fails: 0, timer: null, inflight: false };
-  var API = Q.api || ('api/state' + (Q.fixture ? '?fixture=' + encodeURIComponent(Q.fixture) : ''));
-  function httpSchedule(ms) { clearTimeout(http.timer); if (!D.hidden) http.timer = setTimeout(httpPoll, ms); }
+  // ------------------------------------------------------------------ connection indicator (both transports)
+  function updConn() {
+    if (c4.active) setConn(!c4.ok && (!http.on || http.bad));
+    else setConn(http.bad);
+  }
+
+  // ------------------------------------------------------------------ transport (b): HTTP polling / LAN relay
+  // Same code path for the page served by the driver's LAN port ("api/state", same origin) and for the LAN
+  // relay ("<relay>/api/state", cross origin from controller://). The relay sends no custom request header
+  // (no CORS preflight): its ETag goes back as ?inm=. Failures back off to 10 s (LAN page) / 30 s (relay,
+  // e.g. a phone away from home that cannot reach the controller).
+  var http = { etag: null, fails: 0, timer: null, inflight: false, on: false, relay: false, bad: false, gen: 0, delivered: false, vis: false };
+  function apiUrl() {
+    var base, qs = [];
+    if (http.relay) base = RELAY + '/api/state';
+    else { base = Q.api || 'api/state'; if (!Q.api && Q.fixture) qs.push('fixture=' + encodeURIComponent(Q.fixture)); }
+    if (KEY) qs.push('k=' + encodeURIComponent(KEY));
+    if (http.relay && http.etag) qs.push('inm=' + encodeURIComponent(http.etag));
+    return qs.length ? base + (base.indexOf('?') < 0 ? '?' : '&') + qs.join('&') : base;
+  }
+  function relayLive() { return http.on && http.relay && http.delivered; }
+  function httpSchedule(ms) { clearTimeout(http.timer); if (http.on && !D.hidden) http.timer = setTimeout(httpPoll, ms); }
   function httpPoll() {
-    if (D.hidden || http.inflight) return;
+    if (!http.on || D.hidden || http.inflight) return;
     http.inflight = true;
+    var gen = http.gen, via = http.relay ? 'relay' : 'http';
     var ctl = typeof AbortController === 'function' ? new AbortController() : null;
     var to = setTimeout(function () { if (ctl) ctl.abort(); }, 8000);
-    var headers = {}; if (http.etag) headers['If-None-Match'] = http.etag;
+    var headers = {}; if (http.etag && !http.relay) headers['If-None-Match'] = http.etag;
     var opts = { cache: 'no-store', headers: headers, credentials: 'same-origin' }; if (ctl) opts.signal = ctl.signal;
-    fetch(API, opts).then(function (res) {
+    fetch(apiUrl(), opts).then(function (res) {
+      if (gen !== http.gen) return { stale: true };
       var ds = null, dh = res.headers.get('Date');
       if (dh) { var t = Date.parse(dh); if (!isNaN(t)) ds = nowS() - t / 1000 - 0.5; }
       if (res.status === 304) return { ok: true };
       if (!res.ok) throw new Error('HTTP ' + res.status);
       var et = res.headers.get('ETag');
       return res.json().then(function (j) {
+        if (gen !== http.gen) return { stale: true };
         var st = extractState(j, 0) || j;
         if (!isObj(st) || !isObj(st.playback)) throw new Error('bad payload');
         http.etag = et || null;
-        ingest(st, 'http', ds);
+        http.delivered = true;
+        noteVia(via, j);
+        ingest(st, via, ds);
         return { ok: true };
       });
-    }).then(function () {
-      http.fails = 0; setConn(false);
+    }).then(function (r) {
+      if (r && r.stale) return;
+      http.fails = 0; http.bad = false; updConn();
     }, function (err) {
+      if (gen !== http.gen) return;
       http.fails++;
-      if (http.fails >= 2 || !cur) setConn(true);
-      if (!cur) showIdle(null);
-      if (W.console && http.fails === 1) console.warn('state fetch failed:', err && err.message);
+      http.bad = http.fails >= 2 || !cur;
+      updConn();
+      if (!cur && !c4.ok) showIdle(null);
+      if (W.console && http.fails === 1) console.warn((http.relay ? 'relay' : 'state') + ' fetch failed:', err && err.message);
     }).then(function () {
-      clearTimeout(to); http.inflight = false;
-      httpSchedule(http.fails ? Math.min(2000 * Math.pow(2, http.fails - 1), 10000) : 2000);
+      clearTimeout(to);
+      if (gen !== http.gen) return;
+      http.inflight = false;
+      var cap = http.relay ? 30000 : 10000;
+      httpSchedule(http.fails ? Math.min(2000 * Math.pow(2, http.fails - 1), cap) : 2000);
     });
   }
-  function startHttp() {
+  function startPoll(relay) {
+    http.on = true; http.relay = !!relay; http.fails = 0; http.bad = false; http.etag = null; http.inflight = false;
+    http.gen++;
+    if (!http.vis) {
+      http.vis = true;
+      D.addEventListener('visibilitychange', function () {
+        clearTimeout(http.timer);
+        if (http.on && !D.hidden) httpPoll();
+      });
+    }
     httpPoll();
-    D.addEventListener('visibilitychange', function () {
-      if (D.hidden) clearTimeout(http.timer); else { clearTimeout(http.timer); httpPoll(); }
-    });
+  }
+  function stopPoll() {
+    http.on = false; http.gen++; http.inflight = false; http.bad = false; http.delivered = false;
+    clearTimeout(http.timer);
   }
 
   // ------------------------------------------------------------------ boot
@@ -1403,7 +1485,7 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
   function hasC4() { return !!(W.C4 && typeof W.C4.subscribeToDataToUi === 'function'); }
   function start() {
     if (started) return; started = true;
-    if (hasC4()) startC4(); else startHttp();
+    if (hasC4()) startC4(); else startPoll(!!(RELAY && KEY && !Q.api));
   }
   if (hasC4()) start();
   else if (D.readyState === 'complete') start();

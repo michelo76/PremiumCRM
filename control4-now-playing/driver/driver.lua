@@ -53,8 +53,11 @@ function OnWatchedVariableChanged(idDevice, idVariable, strValue)
   call("on_watched_variable_changed", idDevice, idVariable, strValue)
 end
 
-function OnServerDataIn(nHandle, strData) call("on_server_data_in", nHandle, strData) end
+-- OS 3.3.1+ appends the client address / port and the identifier given to C4:CreateServer.
+function OnServerDataIn(nHandle, strData, strAddress, nPort, strIdentifier)
+  call("on_server_data_in", nHandle, strData, strAddress, nPort, strIdentifier)
+end
 
-function OnServerConnectionStatusChanged(nHandle, nPort, strStatus)
-  call("on_server_status", nHandle, nPort, strStatus)
+function OnServerConnectionStatusChanged(nHandle, nPort, strStatus, a4, a5)
+  call("on_server_status", nHandle, nPort, strStatus, a4, a5)
 end

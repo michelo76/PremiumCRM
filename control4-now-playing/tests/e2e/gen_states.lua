@@ -10,6 +10,10 @@ and writes exactly what the web page would receive:
   <out>/<name>.artwork.json  [ { "cmd": "NOW_PLAYING_ARTWORK", "params": {url, data|error} }, ... ]
                              the driver's real replies to GET_ARTWORK for every LAN image URL of
                              the state (what a Navigator page asks for)
+  <out>/<name>.relay.json    the driver's LAN relay (c4/httpserver.lua) answers, raw HTTP bytes
+                             base64-encoded: { webview_url, token, state (200), not_modified
+                             (?inm=<etag> -> 304), unauthorized (no k -> 401), options (204),
+                             artwork = { [url] = 200 with the image bytes } }
   <out>/index.json           scenario list + the mock clock
 
   lua5.1 tests/e2e/gen_states.lua <out_dir>          (also: luajit)
@@ -26,6 +30,8 @@ local Mock = require("c4_mock")
 local json = require("np.json")
 local App = require("c4.app")
 local Artwork = require("c4.artwork")
+local b64 = require("c4.b64")
+local RELAY_TOKEN = "e2e-relay-token-0123456789" -- fixed (persisted) so lua5.1 / luajit output is identical
 
 local OUT = arg[1] or (root .. "/build/e2e")
 os.execute("mkdir -p '" .. OUT .. "'")
@@ -56,6 +62,7 @@ local ICON = { status = 200, body = file("lan_icon.png"), headers = { ["Content-
 local function new(props)
   local m = Mock.new({ root = root .. "/driver", room_id = ROOM, room_name = "Family Room" })
   m.Properties["Use Control4 Room Media"] = "Off"
+  m.persist["np_lan_token_v1"] = RELAY_TOKEN
   for k, v in pairs(props or {}) do
     assert(m.xml.properties[k], "unknown property " .. k)
     m.Properties[k] = v
@@ -220,6 +227,36 @@ for _, sc in ipairs(SCENARIOS) do
   end
   assert(#replies == #lan, sc.name .. ": expected " .. #lan .. " artwork replies, got " .. #replies)
   write(OUT .. "/" .. sc.name .. ".artwork.json", json.encode(replies))
+  -- the LAN relay, exactly as a page reaches it (default port 8487, token from the web view URL)
+  local urls = m:proxy_cmds("URL_CHANGED")
+  local wv = assert(urls[#urls], sc.name .. ": no URL_CHANGED").params.url
+  assert(wv:find("?relay=http%3A%2F%2F192.168.1.5%3A8487&k=" .. RELAY_TOKEN, 1, true), sc.name .. ": web view URL " .. wv)
+  local hn = 900
+  local function relay(target, extra)
+    hn = hn + 1
+    m:connect(hn)
+    m:client_send(hn, (extra and "OPTIONS " or "GET ") .. target .. " HTTP/1.1\r\nHost: 192.168.1.5:8487\r\nOrigin: controller://driver\r\n\r\n")
+    m:advance(2)
+    local raw = m:response(hn)
+    assert(raw ~= "" and m.closed[hn], sc.name .. ": relay gave no answer for " .. target)
+    return raw
+  end
+  local function q(v) return (v:gsub("[^%w%-%._~]", function(c) return string.format("%%%02X", c:byte()) end)) end
+  local rs = relay("/api/state?k=" .. RELAY_TOKEN)
+  assert(rs:find("^HTTP/1.1 200") and rs:find("\r\n\r\n{\"sent_at\":"), sc.name .. ": relay state")
+  local etag = assert(rs:match("\r\nETag: ([^\r]+)"), sc.name .. ": relay ETag")
+  local rec = { webview_url = wv, token = RELAY_TOKEN, etag = etag, state = b64.encode(rs),
+    not_modified = b64.encode(relay("/api/state?k=" .. RELAY_TOKEN .. "&inm=" .. q(etag))),
+    unauthorized = b64.encode(relay("/api/state")), options = b64.encode(relay("/api/state", true)), artwork = {} }
+  assert(b64.decode(rec.not_modified):find("^HTTP/1.1 304"), sc.name .. ": relay 304")
+  assert(b64.decode(rec.unauthorized):find("^HTTP/1.1 401"), sc.name .. ": relay 401")
+  for _, u in ipairs(lan) do
+    local ra = relay("/api/artwork?url=" .. q(u) .. "&k=" .. RELAY_TOKEN)
+    assert(ra:find("^HTTP/1.1 200") and ra:find("Content%-Type: image/"), sc.name .. ": relay artwork " .. u .. ": " .. ra:sub(1, 40))
+    rec.artwork[u] = b64.encode(ra)
+  end
+  if #lan == 0 then rec.artwork = json.object({}) end
+  write(OUT .. "/" .. sc.name .. ".relay.json", json.encode(rec))
   index.scenarios[#index.scenarios + 1] = { name = sc.name, desc = sc.desc, version = st.version,
     state = st.playback.state, kind = st.media.kind, bytes = #sj, lan_images = #lan, pre = pre and true or nil }
   io.write(string.format("%-11s v%-3d %-8s %-8s %6d bytes  %s\n", sc.name, st.version, st.playback.state,

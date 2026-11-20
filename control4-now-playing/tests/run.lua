@@ -20,7 +20,7 @@ local SPECS = {
   "pipeline_spec", "schema_spec", "flatten_spec", "engine_spec",
   -- Control4 glue (tests/c4/): pure modules, then the real driver.lua against the C4 mock
   "c4/static_spec", "c4/config_spec", "c4/events_spec", "c4/room_spec", "c4/artwork_spec",
-  "c4/httpserver_spec", "c4/driver_spec",
+  "c4/httpserver_spec", "c4/status_spec", "c4/driver_spec",
 }
 
 local verbose = false
@@ -176,9 +176,10 @@ for _, name in ipairs(SPECS) do
   end
 end
 
+-- io.write, not print: a C4 mock left active by a failed test redirects print() into itself
 for _, f in ipairs(results.failures) do
-  print("\nFAIL: " .. f.name .. "\n  " .. tostring(f.err):gsub("\n", "\n  "))
+  io.write("\nFAIL: " .. f.name .. "\n  " .. tostring(f.err):gsub("\n", "\n  ") .. "\n")
 end
-print(string.format("\n%d passed, %d failed (%s, %.2fs)", results.passed, results.failed,
+io.write(string.format("\n%d passed, %d failed (%s, %.2fs)\n", results.passed, results.failed,
   (jit and jit.version) or _VERSION, os.clock() - t0))
 os.exit(results.failed == 0 and 0 or 1)
