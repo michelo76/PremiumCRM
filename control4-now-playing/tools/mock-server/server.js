@@ -187,6 +187,9 @@ function indexPage() {
  * ?c4drop=N  ignores the first N GET_STATE commands (tests the no-response -> retry path).
  * ?c4dead=1  the JS API exists but never delivers anything (field finding on a real touch screen).
  * ?c4delay=MS  answers GET_STATE only after MS milliseconds.
+ * ?c4dieafter=N  answers the first N GET_STATE commands, then goes dead (no replies, no pushes): a channel
+ *   that dies after a first delivery (Navigator backgrounded / reopened). window.__c4ctl.die() / .revive()
+ *   switch the fake channel off / on again from a test.
  * /_mock/fail?on=1 makes the fake driver go silent (no pushes, no replies).
  * window.__c4log records calls for tests.
  */
@@ -195,6 +198,7 @@ const C4_MOCK = '(' + function () {
   location.search.replace(/^\?/, '').split('&').forEach(function (p) { var i = p.indexOf('='); if (i > 0) q[p.slice(0, i)] = decodeURIComponent(p.slice(i + 1)); });
   var drop = +(q.c4drop || 0), shape = 0, lastV = null, timer = null, lastState = null;
   var proxyOnly = q.c4proxy === '1', dead = q.c4dead === '1', delay = +(q.c4delay || 0);
+  var dieAfter = q.c4dieafter != null ? +q.c4dieafter : -1, answered = 0;
   var subs = { dtu: false, vari: false };
   function works(flag) { return proxyOnly ? flag === false : flag === true; }
   var log = window.__c4log = [];
@@ -237,7 +241,8 @@ const C4_MOCK = '(' + function () {
     else if (s === 3) window.onDataToUi(json);
     else window.onVariable({ state: st });
   }
-  function watch() { if (lastV === null) return; fetchState(function (st) { if (st && st.version !== lastV) { lastV = st.version; deliver(st); } }); }
+  window.__c4ctl = { die: function () { dead = true; log.push('died'); }, revive: function () { dead = false; dieAfter = -1; log.push('revived'); } };
+  function watch() { if (lastV === null || dead) return; fetchState(function (st) { if (st && st.version !== lastV) { lastV = st.version; deliver(st); } }); }
   window.C4 = {
     subscribeToDataToUi: function (b) {
       log.push('subscribeToDataToUi:' + b);
@@ -256,7 +261,13 @@ const C4_MOCK = '(' + function () {
       if (name === 'GET_ARTWORK') { try { artwork(JSON.parse(params).url); } catch (e) { log.push('bad GET_ARTWORK'); } return; }
       if (name !== 'GET_STATE') return;
       if (drop > 0) { drop--; log.push('dropped'); return; }
-      setTimeout(function () { fetchState(function (st) { if (st) { lastV = st.version; deliver(st); } }); }, delay);
+      var n = ++answered;
+      setTimeout(function () {
+        fetchState(function (st) {
+          if (st && !dead) { lastV = st.version; deliver(st); }
+          if (dieAfter >= 0 && n >= dieAfter && !dead) { dieAfter = -1; dead = true; log.push('died'); }
+        });
+      }, delay);
     },
   };
 }.toString() + ')();';

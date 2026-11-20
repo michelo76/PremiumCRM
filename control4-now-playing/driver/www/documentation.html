@@ -125,8 +125,9 @@ sends that one image back (<b>Embed LAN Artwork = On</b>). Only images of what i
 <h3 id="relay">LAN relay (on by default)</h3>
 <p>On some touch screens the Navigator delivers no data to the page. The driver therefore also listens on the controller&rsquo;s <b>LAN Web Port</b>
 (default <b>8487</b>) and puts that address into the button&rsquo;s URL (<code>?relay=http://&lt;controller-ip&gt;:8487&amp;k=&lt;token&gt;</code>,
-see the read-only <b>Web View URL</b> property). When the page gets nothing from the Navigator within about 5 seconds, it fetches the information
-(and LAN artwork) directly from the controller on that port; as soon as the Navigator delivers, it switches back.</p>
+see the read-only <b>Web View URL</b> property). When the Navigator does not answer within about 5 seconds &mdash; at start, when the page is
+reopened, or on a check about every 45 seconds while the page is shown &mdash; it fetches the information (and LAN artwork) directly from the
+controller on that port; as soon as the Navigator delivers again, it switches back.</p>
 <ul>
   <li><b>Firewall:</b> touch screens and phones on the home network must be able to reach the controller on <b>TCP 8487</b> (or the port you set).
       Check VLANs / client isolation between the touch screens and the controller.</li>

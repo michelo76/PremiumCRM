@@ -10,6 +10,10 @@
  *   4. wrong relay key: 401s back off (no spinning, no console spam).
  *   5. remote client (relay unreachable): C4 answering late wins and relay polling stops; C4 answering
  *      at once never touches the relay.
+ *   6. ?c4dieafter=1 (the JS API delivers once, then goes dead): the GET_STATE heartbeat (visible page) or
+ *      the re-request on returning to the page misses its deadline and the relay takes over with the newer
+ *      state; C4 coming back stops relay polling; a hidden page sends no heartbeats; a remote client whose
+ *      relay is unreachable stays bounded and shows the reconnecting pill.
  *   node tests/e2e/mock_c4.js   (starts tools/mock-server itself)
  */
 'use strict';
@@ -47,9 +51,20 @@ const artSwapped = (page, re, ms) => page.waitForFunction((src) => {
   return im && new RegExp(src).test(im.getAttribute('src'));
 }, re, { timeout: ms || 8000 }).then(() => true, () => false);
 const lastInfo = (page) => page.evaluate(() => ({ log: window.__c4log || [], np: { via: window.__npLast.via, at: window.__npLast.at,
-  counts: window.__npLast.counts, subscribe: window.__npLast.subscribe || [] },
+  counts: window.__npLast.counts, subscribe: window.__npLast.subscribe || [], transport: window.__npLast.transport,
+  fallbacks: window.__npLast.fallbacks, heartbeats: window.__npLast.heartbeats, version: window.__npLast.raw && window.__npLast.raw.version },
   conn: document.getElementById('conn').classList.contains('is-on'), mode: document.body.className,
   title: (document.querySelector('h1.title') || {}).textContent || '' }));
+
+// fake clock: advance n seconds, letting real fetches settle in between
+async function advance(page, secs) { for (let i = 0; i < secs; i++) { await page.clock.runFor(1000); await sleep(40); } }
+const setHidden = (page, h) => page.evaluate((hid) => {
+  Object.defineProperty(document, 'hidden', { configurable: true, get: () => hid });
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (hid ? 'hidden' : 'visible') });
+  document.dispatchEvent(new Event('visibilitychange'));
+}, h);
+const getStates = (log) => log.filter((l) => /^sendCommand:GET_STATE:/.test(l)).length;
+const relayHits = (requests, r) => requests.filter((x) => x.url.indexOf(r + '/api/state') === 0 && !x.failed).length;
 
 (async () => {
   await new Promise((r) => { let seen = ''; srv.stdout.on('data', (d) => { seen += d; if (/mock server on/.test(seen) && /relay emulation/.test(seen)) r(); }); });
@@ -189,8 +204,98 @@ const lastInfo = (page) => page.evaluate(() => ({ log: window.__c4log || [], np:
     await page.close();
   }
 
+  // ---- 6. JS API delivers once, then dies
+  {
+    // 6a. silent death on a visible page: the heartbeat misses its deadline, the relay takes over
+    await getJson(`${base}/_mock/set?fixture=movie-local-art`);
+    const { page, errors, requests } = await open(browser, `c4dieafter=1&relay=${encodeURIComponent(RELAY)}&k=${KEY}`, { clock: true });
+    await advance(page, 3);
+    let info = await lastInfo(page);
+    const title1 = info.title;
+    check(/mode-np/.test(info.mode) && (info.np.via === 'dataToUi' || info.np.via === 'variable'), 'c4 dies: first state via C4 (' + info.np.via + ')');
+    check(relayHits(requests, RELAY) === 0, 'c4 dies: relay untouched while C4 delivered');
+    await getJson(`${base}/_mock/set?fixture=music-local-art`);
+    const want = (await getJson(`${RELAY}/api/state?k=${KEY}`)).version;
+    await advance(page, 70); // heartbeat (45 s) + 5 s deadline + relay poll
+    info = await lastInfo(page);
+    check(info.title !== title1 && info.title.length > 0, `c4 dies: new state picked up via the relay ("${title1}" -> "${info.title}")`);
+    check(info.np.via === 'relay' && info.np.transport === 'relay', 'c4 dies: __npLast.via/transport = ' + info.np.via + '/' + info.np.transport);
+    check(info.np.version === want, `c4 dies: relay version ${info.np.version} = ${want}`);
+    check(info.np.fallbacks === 1, 'c4 dies: one fallback, no flapping (' + info.np.fallbacks + ')');
+    check(!info.conn, 'c4 dies: no reconnecting pill while the relay delivers');
+    check(getStates(info.log) <= 8, 'c4 dies: GET_STATE retries bounded (' + getStates(info.log) + ')');
+
+    // 6c. C4 comes back: relay polling stops
+    await page.evaluate(() => window.__c4ctl.revive());
+    await advance(page, 40);
+    const n1 = relayHits(requests, RELAY);
+    await advance(page, 20);
+    info = await lastInfo(page);
+    check(relayHits(requests, RELAY) === n1, `c4 back: relay polling stopped (${n1} -> ${relayHits(requests, RELAY)})`);
+    check((info.np.via === 'dataToUi' || info.np.via === 'variable') && info.np.transport === 'c4', 'c4 back: via/transport = ' + info.np.via + '/' + info.np.transport);
+    check(!info.conn, 'c4 back: no reconnecting pill');
+    check(info.np.fallbacks === 1, 'c4 back: fallbacks = ' + info.np.fallbacks);
+    errors.forEach((e) => failures.push('c4 dies: ' + e));
+    await page.close();
+  }
+  {
+    // 6b. the reported case: Navigator backgrounded and reopened after the channel died (real time)
+    await getJson(`${base}/_mock/set?fixture=movie-local-art`);
+    const { page, errors } = await open(browser, `c4dieafter=1&relay=${encodeURIComponent(RELAY)}&k=${KEY}`);
+    await page.waitForFunction(() => document.body.classList.contains('mode-np'), null, { timeout: 8000 }).catch(() => failures.push('reopen: never rendered'));
+    const title1 = (await lastInfo(page)).title;
+    await getJson(`${base}/_mock/set?fixture=music-local-art`);
+    await setHidden(page, true); await sleep(1000); await setHidden(page, false);
+    const t0 = Date.now();
+    const ok = await page.waitForFunction((t) => { const h = document.querySelector('h1.title'); return h && h.textContent !== t && window.__npLast.via === 'relay'; },
+      title1, { timeout: 12000 }).then(() => true, () => false);
+    const info = await lastInfo(page);
+    check(ok, `reopen: relay delivered the new state after the C4 deadline (${Date.now() - t0} ms, via ${info.np.via}, "${info.title}")`);
+    check(!info.conn, 'reopen: no reconnecting pill');
+    errors.forEach((e) => failures.push('reopen: ' + e));
+    await page.close();
+  }
+  {
+    // 6d. heartbeats only while visible; they never re-render
+    const { page, errors } = await open(browser, 'fixture=movie-local-art', { clock: true });
+    await advance(page, 3);
+    await page.evaluate(() => { const h = document.querySelector('h1.title'); if (h) h.__mark = 1; window.__np0 = document.getElementById('np').innerHTML; });
+    const n0 = getStates((await lastInfo(page)).log);
+    await setHidden(page, true);
+    await advance(page, 150);
+    const n1 = getStates((await lastInfo(page)).log);
+    check(n1 === n0, `hidden: no heartbeats while hidden (${n0} -> ${n1})`);
+    await setHidden(page, false);
+    await advance(page, 140);
+    const info = await lastInfo(page);
+    const hb = getStates(info.log) - n1;
+    check(hb >= 3 && hb <= 5, 'visible: GET_STATE on return + heartbeats in 140 s = ' + hb);
+    check(info.np.heartbeats >= 2, 'visible: __npLast.heartbeats = ' + info.np.heartbeats);
+    const same = await page.evaluate(() => { const h = document.querySelector('h1.title'); return !!(h && h.__mark); });
+    check(same, 'heartbeat: unchanged-version replies do not rebuild the page');
+    check(info.np.fallbacks === 0 && !info.conn, 'heartbeat: answered heartbeats never fall back / show the pill');
+    errors.forEach((e) => failures.push('heartbeat: ' + e));
+    await page.close();
+  }
+  {
+    // 6e. remote client, relay unreachable, C4 dies: bounded retries, pill shown
+    const { page, errors, requests } = await open(browser, `fixture=movie-local-art&c4dieafter=1&relay=${encodeURIComponent(DEAD_RELAY)}&k=${KEY}`, { clock: true });
+    await advance(page, 3);
+    await advance(page, 180);
+    const info = await lastInfo(page);
+    const tries = requests.filter((r) => r.url.indexOf(DEAD_RELAY) === 0 && !r.failed).length; // request events only
+    check(tries >= 2 && tries <= 10, 'remote/c4 dies: relay requests in 3 min = ' + tries);
+    check(getStates(info.log) <= 16, 'remote/c4 dies: GET_STATE in 3 min = ' + getStates(info.log));
+    check(info.conn, 'remote/c4 dies: reconnecting pill shown');
+    check(/mode-np/.test(info.mode), 'remote/c4 dies: last state kept on screen');
+    const spam = errors.filter((e) => !/ERR_CONNECTION_REFUSED|Failed to load resource|Failed to fetch/i.test(e));
+    check(spam.length === 0, 'remote/c4 dies: ' + spam.join(' | '));
+    check(errors.length <= 12, 'remote/c4 dies: console errors bounded (' + errors.length + ')');
+    await page.close();
+  }
+
   await browser.close();
   srv.kill();
   if (failures.length) { console.log('MOCK C4 FAILED:\n  ' + failures.join('\n  ')); process.exit(1); }
-  console.log('MOCK C4 PASSED: protocol flag, proxy-only runtime, LAN relay fallback, bad key backoff, remote client');
+  console.log('MOCK C4 PASSED: protocol flag, proxy-only runtime, LAN relay fallback, bad key backoff, remote client, C4 death -> relay / heartbeat');
 })().catch((e) => { console.error(e); srv.kill(); process.exit(2); });

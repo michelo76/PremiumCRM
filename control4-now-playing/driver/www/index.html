@@ -1337,7 +1337,14 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
   // C4:SendDataToUI, ExecuteCommand) when true and the PROXY when false. Protocol is primary; the proxy
   // channel is kept as a fallback (subscribed too; GET_STATE / GET_ARTWORK also sent with it on retries).
   // Each call is guarded on its own: one throwing must not stop the others.
-  var c4 = { active: false, wd: null, miss: 0, seen: false, ok: false, both: false };
+  // Liveness is judged per request, not on whether C4 ever answered: every GET_STATE (first, retry, page
+  // shown again, heartbeat) arms a deadline, and any valid C4 state before it counts as alive (the driver
+  // answers every GET_STATE, an unchanged version included). A missed deadline starts or resumes LAN relay
+  // polling when the URL has one; the next C4 delivery stops it again. The driver only pushes on changes,
+  // so while the page is visible and C4 answers, a GET_STATE heartbeat after 45 s without any C4 delivery
+  // detects a channel that died silently (none while hidden: showing the page sends a fresh GET_STATE).
+  var C4_HEARTBEAT = 45000;
+  var c4 = { active: false, wd: null, hb: null, miss: 0, seen: false, ok: false, both: false };
   function c4Send(name, params, protocol) {
     try { W.C4.sendCommand(name, params, true, protocol); return true; } catch (e) { return false; }
   }
@@ -1347,30 +1354,47 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
     if (p.art) return artReply(p.art);
     if (!c4.seen && c4.miss > 0) c4.both = true; // answered only after a proxy-flag retry
     c4.seen = true; c4.ok = true; c4.miss = 0; clearTimeout(c4.wd); c4.wd = null;
+    c4Beat();
     noteVia(via, x);
-    if (http.on && http.relay) stopPoll(); // the C4 channel works: no LAN polling any more
+    if (http.on && http.relay) stopPoll(); // the C4 channel answers again: no LAN polling
+    npLast.transport = 'c4';
     updConn();
     ingest(p.state, via);
   }
+  // heartbeat: re-armed by every C4 delivery; skipped while a request is pending or the page is hidden
+  function c4Beat() {
+    clearTimeout(c4.hb);
+    c4.hb = D.hidden ? null : setTimeout(function () {
+      c4.hb = null;
+      if (!D.hidden && !c4.wd) { npLast.heartbeats++; c4Request(); }
+    }, C4_HEARTBEAT);
+  }
   function c4Request() {
-    clearTimeout(c4.wd);
+    clearTimeout(c4.wd); clearTimeout(c4.hb); c4.hb = null;
     c4Send('GET_STATE', '{}', true);                  // ExecuteCommand in the driver
-    if (c4.miss > 0) c4Send('GET_STATE', '{}', false); // ReceivedFromProxy (retries only)
+    if (c4.miss > 0 || c4.both) c4Send('GET_STATE', '{}', false); // ReceivedFromProxy (retries / proxy-only runtime)
     var wait = Math.min(5000 * Math.pow(2, c4.miss), 30000);
     c4.wd = setTimeout(function () {
-      c4.miss++; c4.ok = false;
-      // nothing valid from the JS API within ~5 s: fall back to the LAN relay when the URL has one
-      if (!c4.seen && RELAY && KEY && !http.on) startPoll(true);
+      c4.wd = null; c4.miss++; c4.ok = false;
+      // no valid state from the JS API before this request's deadline: LAN relay when the URL has one
+      if (RELAY && KEY && !http.on) {
+        startPoll(true);
+        npLast.transport = 'relay'; npLast.fallbacks++; npLast.fallbackAt = Date.now();
+      }
       updConn();
       if (!cur) showIdle(null);
-      c4Request();
+      if (!D.hidden) c4Request(); // retries back off to 30 s; resumed when the page is shown again
     }, wait);
   }
   // Global callbacks required by the Navigator JS API. Defined unconditionally (harmless otherwise).
   // __npLast keeps the raw payloads and which channel delivered last, for hardware checks from the web
-  // view's JS console: via = 'dataToUi' | 'variable' | 'http' | 'relay', at = ms epoch, raw = payload.
+  // view's JS console: via = 'dataToUi' | 'variable' | 'http' | 'relay', at = ms epoch, raw = payload;
+  // transport = 'c4' | 'relay' | 'http' (relay = C4 missed a deadline and the relay is polled),
+  // fallbacks / fallbackAt = how often / when the page last fell back to the relay, heartbeats = GET_STATE
+  // heartbeats sent.
   var npLast = W.__npLast = { dataToUi: null, variable: null, via: null, at: null, raw: null,
-    counts: { dataToUi: 0, variable: 0, http: 0, relay: 0 }, subscribe: [] };
+    counts: { dataToUi: 0, variable: 0, http: 0, relay: 0 }, subscribe: [],
+    transport: null, fallbacks: 0, fallbackAt: null, heartbeats: 0 };
   function noteVia(via, raw) { npLast.via = via; npLast.at = Date.now(); npLast.raw = raw; npLast.counts[via] = (npLast.counts[via] || 0) + 1; }
   W.onDataToUi = function (x) { npLast.dataToUi = x; c4Receive(x, 'dataToUi'); };
   W.onVariable = function (x) { npLast.variable = x; c4Receive(x, 'variable'); };
@@ -1383,14 +1407,17 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
     try { fn(); npLast.subscribe.push(label + ':ok'); } catch (e) { npLast.subscribe.push(label + ':threw'); }
   }
   function startC4() {
-    c4.active = true;
+    c4.active = true; npLast.transport = 'c4';
     // proxy first, protocol last: should a host keep only the latest subscription, protocol wins
     c4Sub('variable:proxy', function () { W.C4.subscribeToVariable('STATE_JSON', false); });
     c4Sub('dataToUi:proxy', function () { W.C4.subscribeToDataToUi(false); });
     c4Sub('variable:protocol', function () { W.C4.subscribeToVariable('STATE_JSON', true); });
     c4Sub('dataToUi:protocol', function () { W.C4.subscribeToDataToUi(true); });
     c4Request();
-    D.addEventListener('visibilitychange', function () { if (!D.hidden) c4Request(); });
+    D.addEventListener('visibilitychange', function () {
+      if (!D.hidden) return c4Request();
+      clearTimeout(c4.hb); c4.hb = null; clearTimeout(c4.wd); c4.wd = null; // hidden: no heartbeats / retries
+    });
   }
 
   // ------------------------------------------------------------------ connection indicator (both transports)
@@ -1485,7 +1512,8 @@ svg.ic{width:1em;height:1em;display:inline-block;vertical-align:middle;flex:0 0 
   function hasC4() { return !!(W.C4 && typeof W.C4.subscribeToDataToUi === 'function'); }
   function start() {
     if (started) return; started = true;
-    if (hasC4()) startC4(); else startPoll(!!(RELAY && KEY && !Q.api));
+    if (hasC4()) startC4();
+    else { var r = !!(RELAY && KEY && !Q.api); npLast.transport = r ? 'relay' : 'http'; startPoll(r); }
   }
   if (hasC4()) start();
   else if (D.readyState === 'complete') start();

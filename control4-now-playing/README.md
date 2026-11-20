@@ -109,9 +109,11 @@ same `<img>` node.
 Screenshots (1280×800, 1920×1080, 390×844; `<name>-relay-1280x800.png` for relay mode) go to
 `build/e2e/shots`. `tests/e2e/mock_c4.js` drives the mock server's fake Navigator, which honours the
 protocol/proxy flag like the real API (`?c4proxy=1` = only the proxy flag works, `?c4dead=1` = the
-JS API never answers, `?c4delay=ms`) and its relay emulation (`--relay-port`): GET_ARTWORK with
-the protocol flag, a proxy-only runtime, the relay fallback with ETag/304, bad-key backoff and a
-remote client that cannot reach the relay.
+JS API never answers, `?c4delay=ms`, `?c4dieafter=N` = answers N GET_STATEs then goes dead) and
+its relay emulation (`--relay-port`): GET_ARTWORK with the protocol flag, a proxy-only runtime, the
+relay fallback with ETag/304, bad-key backoff, a remote client that cannot reach the relay, and a
+JS API that dies after its first delivery (heartbeat / page reopened → relay, C4 back → relay
+stops, no heartbeats while hidden).
 
 The c4z **must** be named `now_playing_info.c4z`: `controller://driver/now_playing_info/` maps
 to its `www/` folder (web view URL and Navigator icons).
@@ -238,19 +240,24 @@ driver's **Refresh** command for belt-and-braces updates (the REVISION listener 
    worked). The driver listens on **LAN Web Port** (default **8487**, 0 = off) and announces
    `controller://driver/now_playing_info/index.html?relay=<urlencoded http://<controller-ip>:<port>>&k=<token>`
    with `URL_CHANGED` (relay params omitted while the server is off/failing or the controller IP is
-   unknown). If no valid state arrived through the JS API within ~5 s and the URL has `relay`, the
-   page polls `<relay>/api/state?k=…` (2 s; ETag sent back as `&inm=` so the request is "simple" and
-   needs no CORS preflight → 304) while still listening on the C4 channels; whichever delivers a
-   newer `version` wins, and the first C4 delivery stops relay polling for good. In relay mode LAN
-   artwork is loaded from `<relay>/api/artwork?url=…&k=…` instead of GET_ARTWORK. A phone away from
-   home cannot reach the relay: if the JS API answers within 5 s the relay is never touched;
-   otherwise failures back off to one request per 30 s, with one console warning.
+   unknown). Fallback is judged per request: every GET_STATE (first, retry, page shown again, and a
+   heartbeat after 45 s without any C4 delivery while the page is visible — the driver only pushes on
+   changes, but answers every GET_STATE) arms a ~5 s deadline. If no valid state arrives through the
+   JS API before it and the URL has `relay`, the page polls `<relay>/api/state?k=…` (2 s; ETag sent
+   back as `&inm=` so the request is "simple" and needs no CORS preflight → 304) while still
+   retrying the C4 channels (backing off to 30 s); whichever delivers a newer `version` wins, and the
+   next C4 delivery stops relay polling again. No heartbeats or retries while the page is hidden. In
+   relay mode LAN artwork is loaded from `<relay>/api/artwork?url=…&k=…` instead of GET_ARTWORK. A
+   phone away from home cannot reach the relay: while the JS API answers the relay is never touched;
+   otherwise failures back off to one request per 30 s, with one console warning. The reconnecting
+   pill shows only when both the JS API and the relay fail.
 3. No `window.C4` (a browser on the LAN opening `http://<controller>:<port>/?k=<token>`, the
    **LAN URL** property): plain HTTP polling of `api/state?k=…` (or of the relay when `?relay=` is
    given).
 
 `window.__npLast` records which channel delivered last for hardware checks:
 `{ via: 'dataToUi' | 'variable' | 'http' | 'relay', at: <ms epoch>, raw: <payload>, counts: {…},
+transport: 'c4' | 'relay' | 'http', fallbacks: <n>, fallbackAt: <ms epoch>, heartbeats: <n>,
 subscribe: ['variable:proxy:ok', …, 'dataToUi:protocol:threw'], dataToUi: <raw>, variable: <raw> }`.
 
 ### LAN relay endpoints (`c4/httpserver.lua`)
